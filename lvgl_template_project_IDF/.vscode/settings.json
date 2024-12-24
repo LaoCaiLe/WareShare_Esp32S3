@@ -1,0 +1,21 @@
+{
+    "C_Cpp.intelliSenseEngine": "default",
+    "idf.espIdfPathWin": "f:\\ESP-IDF\\project\\Expressif\\v5.3.2\\esp-idf",
+    "idf.toolsPathWin": "d:\\SOFTWARE\\VSCode\\ESP\\.espressif",
+    "idf.openOcdConfigs": [
+        "board/esp32s3-builtin.cfg"
+    ],
+    "files.associations": {
+        "lvgl.h": "c",
+        "esp_lcd_ili9341.h": "c",
+        "esp_lcd_gc9a01.h": "c",
+        "esp_lcd_panel_vendor.h": "c",
+        "esp_lcd_touch_stmpe610.h": "c",
+        "lv_demo_music.h": "c",
+        "spectrum_1.h": "c",
+        "lv_demos.h": "c",
+        "lv_demo_benchmark.h": "c"
+    },
+    "idf.flashType": "UART",
+    "idf.portWin": "COM3"
+}
