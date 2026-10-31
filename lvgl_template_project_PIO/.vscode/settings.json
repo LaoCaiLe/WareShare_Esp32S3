@@ -8,5 +8,6 @@
         "vector": "cpp",
         "string_view": "cpp",
         "initializer_list": "cpp"
-    }
+    },
+    "cmake.sourceDirectory": "F:/ESP-IDF/project/wave_share_esp32_s3/lvgl_template_project_PIO/lib/lvgl"
 }
