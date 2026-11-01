@@ -27,7 +27,7 @@ lv_obj_t *page_net_create(lv_obj_t *parent, lv_color_t accent)
     const mon_ui_metrics_t *m = mon_ui();
     const sys_sample_t *s = sampler_get();
 
-    mon_page_ui_create(&s_ui, parent, "NETWORK", accent);
+    mon_page_ui_create(&s_ui, parent, "NET", accent);
 
     s_chart = mon_chart_create(s_ui.stage, m->stage_w, m->stage_h, true);
     lv_chart_set_range(s_chart, LV_CHART_AXIS_PRIMARY_Y, 0, 1000);
@@ -58,7 +58,7 @@ void page_net_update(const sys_sample_t *s)
     char num[24];
     char unit[12];
     char up[32];
-    char total[32];
+    char down[32];
     char note[48];
 
     mon_fmt_rate(s->net_rx_bps, m->compact, num, sizeof(num),
@@ -66,11 +66,10 @@ void page_net_update(const sys_sample_t *s)
     mon_page_set_hero(&s_ui, num, unit);
 
     mon_fmt_rate_line(s->net_tx_bps, m->compact, up, sizeof(up));
-    mon_page_set_stat(&s_ui, 0, up, "UPLOAD");
+    mon_page_set_stat(&s_ui, 0, up, "UP");
 
-    mon_fmt_size((s->net_rx_total + s->net_tx_total) / 1024ULL,
-                 m->compact, total, sizeof(total));
-    mon_page_set_stat(&s_ui, 1, total, "TOTAL");
+    mon_fmt_rate_line(s->net_rx_bps, m->compact, down, sizeof(down));
+    mon_page_set_stat(&s_ui, 1, down, "DOWN");
 
     uint32_t peak = 64U * 1024U;
     for (int i = 0; i < MON_HIST_LEN; i++) {

@@ -25,6 +25,14 @@ void udp_reader_init(void);
  */
 void udp_reader_poll(pc_data_t *data);
 
+/**
+ * Turn the WiFi radio on or off at runtime (SETTINGS screen).
+ * Enabling starts the station again; disabling stops UDP and powers the
+ * radio down. The choice is persisted by app_settings.
+ */
+void udp_reader_set_enabled(bool on);
+bool udp_reader_enabled(void);
+
 #ifdef __cplusplus
 }
 #endif

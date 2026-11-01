@@ -28,6 +28,9 @@ static CST816S s_touch(6, 7, 13, 5);
 
 static touch_gesture_cb_t s_gesture_cb;
 
+static bool s_mirror = true;               /* display is at 180° by default */
+static uint32_t s_last_activity_ms;
+
 static bool s_pressed;
 static lv_coord_t s_press_x;
 static lv_coord_t s_press_y;
@@ -57,15 +60,19 @@ static void touch_poll_cb(lv_timer_t *timer)
         return;
     }
 
-    /* The display runs at rotation 2 (180°), so mirror the raw panel
-     * coordinates into the same visual space the user sees. Swipe direction
-     * then keeps its on-screen meaning (finger left = previous page). */
-    x = TOUCH_PANEL_MAX - 1 - x;
-    y = TOUCH_PANEL_MAX - 1 - y;
+    /* At 180° the panel's raw coordinates are mirrored relative to what the
+     * user sees; at 0° they already line up. Swipe direction keeps its
+     * on-screen meaning in both cases (finger left = previous page). */
+    if (s_mirror) {
+        x = TOUCH_PANEL_MAX - 1 - x;
+        y = TOUCH_PANEL_MAX - 1 - y;
+    }
 
     bool pressed = (points > 0);
 
     if (pressed) {
+        s_last_activity_ms = lv_tick_get();
+
         if (!s_pressed) {
             s_pressed = true;
             s_press_x = x;
@@ -91,6 +98,9 @@ static void touch_poll_cb(lv_timer_t *timer)
     if (LV_ABS(dx) >= TOUCH_SWIPE_MIN_PX && LV_ABS(dx) > LV_ABS(dy)) {
         s_gesture_cb(dx < 0 ? TOUCH_SWIPE_LEFT : TOUCH_SWIPE_RIGHT);
     }
+    else if (LV_ABS(dy) >= TOUCH_SWIPE_MIN_PX && LV_ABS(dy) > LV_ABS(dx)) {
+        s_gesture_cb(dy < 0 ? TOUCH_SWIPE_UP : TOUCH_SWIPE_DOWN);
+    }
     else if (LV_ABS(dx) <= TOUCH_TAP_MAX_PX &&
              LV_ABS(dy) <= TOUCH_TAP_MAX_PX &&
              lv_tick_elaps(s_press_ms) <= TOUCH_TAP_MAX_MS) {
@@ -112,9 +122,20 @@ void touch_set_gesture_cb(touch_gesture_cb_t cb)
     s_gesture_cb = cb;
 }
 
+void touch_set_mirror(uint8_t mirror)
+{
+    s_mirror = (mirror != 0);
+}
+
+uint32_t touch_last_activity_ms(void)
+{
+    return s_last_activity_ms;
+}
+
 void touch_init(void)
 {
     s_touch.begin();
+    s_last_activity_ms = lv_tick_get();
 
     static lv_indev_drv_t indev_drv;
     lv_indev_drv_init(&indev_drv);

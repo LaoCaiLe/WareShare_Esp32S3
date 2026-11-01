@@ -1,23 +1,17 @@
 """
 PC Hardware Monitor — Windows Companion App
 
-Collects CPU/GPU/RAM/Disk data and sends JSON frames over USB Serial
-to ESP32-S3 for real-time LVGL dashboard display.
+Collects CPU/GPU/RAM/Disk data and broadcasts one JSON datagram per second
+over WiFi to the ESP32-S3 for real-time LVGL dashboard display.
 
 Usage:
-    python monitor.py                # WiFi: broadcast JSON over UDP
-    python monitor.py COM3           # wired fallback: USB serial
+    python monitor.py                # broadcast JSON over UDP
     python monitor.py --dry-run      # print JSON without sending
-    python monitor.py --list         # list available COM ports
 
-UDP datagrams carry the JSON body as-is. Serial frames are wrapped as
-[STX:0x02][JSON][ETX:0x03].
-
-Dependencies: pip install psutil pyserial
+Dependencies: pip install psutil
 Optional: run LibreHardwareMonitor (as admin) with
 "Options -> Remote Web Server -> Run" for CPU temperature.
 """
-import sys
 import os
 import time
 import json
@@ -33,9 +27,6 @@ from datetime import datetime
 # ============================================================
 # Constants
 # ============================================================
-STX = b'\x02'
-ETX = b'\x03'
-BAUD_RATE = 921600
 UDP_PORT = 4210  # keep in sync with NET_UDP_PORT in src/net_config.h
 # Run windowless (pythonw) and every console helper we spawn would pop a new
 # console window — nvidia-smi runs once per frame, so the taskbar flickered.
@@ -173,13 +164,156 @@ def get_cpu_temp_c():
     return _lhm_temp
 
 
+class _PdhCpuCounters:
+    """Read Task Manager's CPU counters via the Windows PDH API.
+
+    % Processor Utility is the CPU percentage Task Manager shows (it folds in
+    frequency scaling, so it reads well above psutil's idle-based % Processor
+    Time). % Processor Performance is the current clock as a percentage of the
+    base clock; Task Manager's "Speed" is base MHz x this / 100. psutil's
+    cpu_freq() only returns Win32_Processor.CurrentClockSpeed, which on this
+    machine stays pinned at the 3.0 GHz base even while the cores boost.
+
+    PDH averages the counters between reads, and the companion reads once per
+    frame, so each value covers the whole frame interval.
+    """
+
+    _FMT_DOUBLE = 0x00000200
+
+    _UTILITY = r"\Processor Information(_Total)\% Processor Utility"
+    _PERFORMANCE = r"\Processor Information(_Total)\% Processor Performance"
+
+    def __init__(self):
+        import ctypes
+        from ctypes import wintypes
+
+        self._ct = ctypes
+        self._wt = wintypes
+
+        class _FmtValue(ctypes.Structure):
+            _fields_ = [("status", wintypes.DWORD),
+                        ("value", ctypes.c_double)]
+
+        self._fmt = _FmtValue
+
+        pdh = ctypes.WinDLL("pdh.dll")
+        self._pdh = pdh
+        pdh.PdhOpenQueryW.argtypes = [
+            wintypes.LPCWSTR, ctypes.c_size_t,
+            ctypes.POINTER(wintypes.HANDLE)]
+        pdh.PdhOpenQueryW.restype = ctypes.c_long
+        pdh.PdhAddEnglishCounterW.argtypes = [
+            wintypes.HANDLE, wintypes.LPCWSTR, ctypes.c_size_t,
+            ctypes.POINTER(wintypes.HANDLE)]
+        pdh.PdhAddEnglishCounterW.restype = ctypes.c_long
+        pdh.PdhCollectQueryData.argtypes = [wintypes.HANDLE]
+        pdh.PdhCollectQueryData.restype = ctypes.c_long
+        pdh.PdhGetFormattedCounterValue.argtypes = [
+            wintypes.HANDLE, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD),
+            ctypes.POINTER(_FmtValue)]
+        pdh.PdhGetFormattedCounterValue.restype = ctypes.c_long
+
+        self._query = wintypes.HANDLE()
+        if pdh.PdhOpenQueryW(None, 0, ctypes.byref(self._query)) != 0:
+            raise OSError("PdhOpenQueryW failed")
+
+        self._utility = self._add(self._UTILITY)
+        if self._utility is None:
+            pdh.PdhCloseQuery(self._query)
+            raise OSError("PdhAddEnglishCounterW failed")
+
+        # Optional: some Windows builds do not expose it.
+        self._performance = self._add(self._PERFORMANCE)
+
+        pdh.PdhCollectQueryData(self._query)   # baseline
+
+    def _add(self, path):
+        handle = self._wt.HANDLE()
+        if self._pdh.PdhAddEnglishCounterW(
+                self._query, path, 0, self._ct.byref(handle)) != 0:
+            return None
+        return handle
+
+    def _value(self, counter):
+        if counter is None:
+            return None
+        val = self._fmt()
+        status = self._pdh.PdhGetFormattedCounterValue(
+            counter, self._FMT_DOUBLE, None, self._ct.byref(val))
+        if status != 0 or val.status != 0:
+            return None
+        return val.value
+
+    def read(self):
+        """(cpu_utility, processor_performance); either may be None."""
+        if self._pdh.PdhCollectQueryData(self._query) != 0:
+            return None, None
+        return self._value(self._utility), self._value(self._performance)
+
+
+_cpu_counters = None
+_cpu_counters_unavailable = False
+
+
+def _read_cpu_counters():
+    """(utility %, performance %) or (None, None) when PDH is unavailable."""
+    global _cpu_counters, _cpu_counters_unavailable
+
+    if _cpu_counters_unavailable:
+        return None, None
+    if _cpu_counters is None:
+        try:
+            _cpu_counters = _PdhCpuCounters()
+        except Exception:
+            _cpu_counters_unavailable = True
+            return None, None
+    try:
+        return _cpu_counters.read()
+    except Exception:
+        _cpu_counters_unavailable = True
+        return None, None
+
+
+_cpu_base_mhz = None
+_cpu_base_mhz_read = False
+
+
+def _get_cpu_base_mhz():
+    """Nominal clock (Task Manager's base speed) from the registry."""
+    global _cpu_base_mhz, _cpu_base_mhz_read
+
+    if not _cpu_base_mhz_read:
+        _cpu_base_mhz_read = True
+        try:
+            import winreg
+            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                r"HARDWARE\DESCRIPTION\System\CentralProcessor\0")
+            value = winreg.QueryValueEx(key, "~MHz")[0]
+            _cpu_base_mhz = float(value) if value else None
+        except Exception:
+            _cpu_base_mhz = None
+    return _cpu_base_mhz
+
+
 def get_cpu_data():
     """Collect CPU usage, frequency, cores, temperature, process count."""
     import psutil
 
-    usage = psutil.cpu_percent(interval=0.5)
-    freq_info = psutil.cpu_freq()
-    freq = round(freq_info.current) if freq_info else 0
+    # Prefer Task Manager's metrics; fall back to psutil where unavailable.
+    utility, performance = _read_cpu_counters()
+    if utility is not None:
+        usage = max(0.0, min(100.0, utility))
+    else:
+        usage = psutil.cpu_percent(interval=0.5)
+
+    # Task Manager's "Speed" = base clock x % Processor Performance / 100.
+    # cpu_freq() on its own reports the static base clock on this machine.
+    base_mhz = _get_cpu_base_mhz()
+    if performance is not None and performance > 0 and base_mhz:
+        freq = round(base_mhz * performance / 100.0)
+    else:
+        freq_info = psutil.cpu_freq()
+        freq = round(freq_info.current) if freq_info else 0
     cores = psutil.cpu_count(logical=True)
     temp = get_cpu_temp_c()
     # No CPU temperature without a driver-backed helper, so the device
@@ -375,7 +509,7 @@ def collect_all():
 
 
 # ============================================================
-# Transport (UDP broadcast / USB serial)
+# Transport (UDP broadcast)
 # ============================================================
 
 def get_broadcast_targets():
@@ -446,88 +580,8 @@ def run_udp(port=UDP_PORT):
     finally:
         sock.close()
 
-def list_ports():
-    """List available COM ports."""
-    import serial.tools.list_ports as lp
-    ports = lp.comports()
-    if not ports:
-        print("No COM ports found")
-        return
-    for p in ports:
-        print(f"  {p.device} - {p.description}")
-
-
-def send_frame(ser, data):
-    """Send a JSON frame over serial."""
-    payload = json.dumps(data, ensure_ascii=False).encode('utf-8')
-    ser.write(STX)
-    ser.write(payload)
-    ser.write(ETX)
-    ser.flush()
-    return len(payload)
-
-
-def read_esp_messages(ser, buffer):
-    """Print text lines sent back by the ESP32 (status / FPS), keep partials."""
-    try:
-        waiting = ser.in_waiting
-        if waiting:
-            buffer += ser.read(waiting)
-    except Exception:
-        return buffer
-
-    while b"\n" in buffer:
-        line, buffer = buffer.split(b"\n", 1)
-        text = line.decode("utf-8", "replace").strip()
-        if text:
-            print(f"\r[ESP] {text}")
-    return buffer
-
-
-def run_serial(port):
-    """Main loop: collect data and send over serial."""
-    import serial
-
-    print(f"Connecting to {port} @ {BAUD_RATE} baud...")
-    try:
-        ser = serial.Serial(port, BAUD_RATE, timeout=1)
-        # Wait for ESP32-S3 to boot
-        time.sleep(2)
-        print(f"Connected. Sending data every {INTERVAL}s...")
-        print("Press Ctrl+C to stop.\n")
-    except serial.SerialException as e:
-        print(f"ERROR: Cannot open {port}: {e}")
-        print("Make sure:")
-        print("  1. ESP32-S3 is connected via USB")
-        print("  2. The port is correct (use --list to see available ports)")
-        print("  3. No other program (Serial Monitor) is using the port")
-        sys.exit(1)
-
-    frame_count = 0
-    rx_text = b""
-    try:
-        while True:
-            rx_text = read_esp_messages(ser, rx_text)
-            data = collect_all()
-            size = send_frame(ser, data)
-            frame_count += 1
-
-            # Pretty print status line
-            cpu_str = f"CPU {data['cpu']['usage']}%"
-            gpu_str = f"GPU {data['gpu']['temp']}°C {data['gpu']['usage']}%" if data['gpu'] else "GPU N/A"
-            ram_str = f"RAM {data['ram']['used']/1024:.1f}/{data['ram']['total']/1024:.1f}G"
-            print(f"[{frame_count:04d}] {cpu_str} | {gpu_str} | {ram_str} | {size}B",
-                  end='\r')
-
-            time.sleep(INTERVAL)
-    except KeyboardInterrupt:
-        print(f"\n\nStopped. Sent {frame_count} frames.")
-    finally:
-        ser.close()
-
-
 def run_dry_run():
-    """Print JSON to console without serial (for testing)."""
+    """Print JSON to console without sending (for testing)."""
     print("=== DRY RUN MODE ===\n")
     data = collect_all()
     print(json.dumps(data, ensure_ascii=False, indent=2))
@@ -560,41 +614,24 @@ def main():
         epilog="""
 Examples:
   python monitor.py                 Broadcast over WiFi (UDP)
-  python monitor.py COM3            Send over USB serial to COM3
   python monitor.py --dry-run       Print JSON without sending
-  python monitor.py --list          List available COM ports
         """
     )
-    parser.add_argument("port", nargs="?",
-                        help="COM port for wired serial mode; omit to "
-                             "broadcast over WiFi/UDP")
-    parser.add_argument("--udp", action="store_true",
-                        help="force WiFi UDP broadcast")
     parser.add_argument("--udp-port", type=int, default=UDP_PORT,
                         help=f"UDP broadcast port (default: {UDP_PORT})")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print JSON to console, don't send")
-    parser.add_argument("--list", action="store_true",
-                        help="List available COM ports and exit")
     parser.add_argument("--interval", type=float, default=INTERVAL,
                         help=f"Update interval in seconds (default: {INTERVAL})")
 
     args = parser.parse_args()
     INTERVAL = args.interval
 
-    if args.list:
-        list_ports()
-        return
-
     if args.dry_run:
         run_dry_run()
         return
 
-    if args.udp or not args.port:
-        run_udp(args.udp_port)
-        return
-
-    run_serial(args.port)
+    run_udp(args.udp_port)
 
 
 if __name__ == "__main__":

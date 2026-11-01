@@ -2,7 +2,7 @@
  * Sampler for the ESP32 build.
  *
  * The desktop version reads /proc and /sys directly. On the ESP32 the PC
- * metrics arrive over UART as pc_data_t frames (see serial_reader.cpp), so
+ * metrics arrive over WiFi/UDP as pc_data_t frames (see udp_reader.cpp), so
  * this sampler only translates/smooths that data into sys_sample_t and
  * keeps the 60-second history buffers the pages draw.
  */
@@ -13,13 +13,17 @@
 
 #include "lvgl.h"
 
+/* The PC sends about one frame per second, so four missed frames mean the
+ * companion or the WiFi link is really gone. */
+#define LINK_STALE_MS 4000U
+
 static sys_sample_t s_sample;
 static const pc_data_t *s_pc;
 static bool s_inited;
-static bool s_cpu_valid;
 static bool s_gpu_valid;
 static bool s_net_valid;
 static bool s_seeded;
+static bool s_disk_seeded;
 
 /* Fallback cumulative counters, used when the PC sends no net totals. */
 static uint64_t s_rx_total_acc;
@@ -78,6 +82,9 @@ static void sample_once(void)
     uint32_t tick = s_sample.sample_count;
 
     if (p == NULL) {
+        s_sample.link_live = false;
+        s_sample.link_ever = false;
+        s_sample.wifi_state = PC_WIFI_OFF;
         if (tick > 0U) history_push();
         s_sample.sample_count = tick + 1U;
         return;
@@ -87,16 +94,19 @@ static void sample_once(void)
     bool fresh = (p->last_recv_ms != 0U) &&
                  (lv_tick_elaps(p->last_recv_ms) < 3000U);
 
+    /* The dial's "no data" notice tolerates one more missed frame than the
+     * network rates, so a single dropped datagram never blinks it. */
+    s_sample.link_live = (p->last_recv_ms != 0U) &&
+                         (lv_tick_elaps(p->last_recv_ms) < LINK_STALE_MS);
+    s_sample.link_ever = (p->frame_count > 0U);
+    s_sample.wifi_state = p->wifi_state;
+
     /* CPU ------------------------------------------------------------ */
+    /* No EMA here: the PC already averages % Processor Utility over the
+     * whole frame interval, and extra smoothing made the dial lag Task
+     * Manager. The hero tween still animates the number. */
     if (p->frame_count > 0U) {
-        uint16_t raw_cpu = clamp_pct(p->cpu.usage);
-        if (!s_cpu_valid) {
-            s_sample.cpu_load = raw_cpu;
-            s_cpu_valid = true;
-        }
-        else {
-            s_sample.cpu_load = ema_u16(s_sample.cpu_load, raw_cpu);
-        }
+        s_sample.cpu_load = clamp_pct(p->cpu.usage);
     }
 
     s_sample.cpu_temp_c = (p->cpu.temp > 0)
@@ -120,8 +130,10 @@ static void sample_once(void)
     s_sample.swap_used_kb = p->ram.swap_used * 1024U;
     s_sample.swap_total_kb = p->ram.swap_total * 1024U;
 
-    /* Disk — aggregate every fixed volume, refresh every 5 s ---------- */
-    if (tick % 5U == 0U) {
+    /* Disk — aggregate every fixed volume. Refresh every 5 s, but seed as
+     * soon as the first frame with volumes arrives: waiting for tick 5 made
+     * the DISK ring stay at 0 for the first ~5 s after boot. */
+    if (!s_disk_seeded || tick % 5U == 0U) {
         uint64_t total_mb = 0;
         uint64_t used_mb = 0;
 
@@ -149,6 +161,10 @@ static void sample_once(void)
         s_sample.disk_load = (total_mb > 0)
                              ? (uint16_t)(used_mb * 100ULL / total_mb)
                              : 0U;
+
+        /* Keep retrying every second until a frame actually carries volumes
+         * (the first frames may arrive before the PC's disk enumeration). */
+        s_disk_seeded = (p->disk_count > 0U);
     }
 
     /* Network -------------------------------------------------------- */

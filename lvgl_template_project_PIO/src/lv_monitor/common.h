@@ -52,6 +52,7 @@ typedef struct {
     lv_obj_t *hero_value;
     lv_obj_t *hero_unit;
     lv_obj_t *stage;
+    lv_obj_t *stage_cover;   /* black wipe cover for the page transition */
     lv_obj_t *sub_row;
     lv_obj_t *stat_value[2];
     lv_obj_t *stat_caption[2];

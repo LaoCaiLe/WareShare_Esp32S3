@@ -11,7 +11,15 @@ typedef struct {
     void (*update)(const sys_sample_t *sample);
     const mon_page_ui_t *(*ui)(void);
     lv_obj_t *root;
+    /* Optional: replay the page's own entry effect when the carousel lands
+     * on it (the overview rings empty and refill). NULL for most pages. */
+    void (*enter)(void);
 } monitor_page_t;
+
+lv_obj_t *page_overview_create(lv_obj_t *parent, lv_color_t accent);
+void page_overview_update(const sys_sample_t *sample);
+void page_overview_enter(void);
+const mon_page_ui_t *page_overview_ui(void);
 
 lv_obj_t *page_cpu_create(lv_obj_t *parent, lv_color_t accent);
 void page_cpu_update(const sys_sample_t *sample);

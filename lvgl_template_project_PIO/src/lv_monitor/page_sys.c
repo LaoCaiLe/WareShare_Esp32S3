@@ -15,7 +15,7 @@ lv_obj_t *page_sys_create(lv_obj_t *parent, lv_color_t accent)
     const mon_ui_metrics_t *m = mon_ui();
     const sys_sample_t *s = sampler_get();
 
-    mon_page_ui_create(&s_ui, parent, "SYSTEM", accent);
+    mon_page_ui_create(&s_ui, parent, "SYS", accent);
 
     /* Uptime is 7-8 characters of text, so the numeric hero size used on
      * the other pages overpowers this page. */

@@ -22,7 +22,7 @@ lv_obj_t *page_disk_create(lv_obj_t *parent, lv_color_t accent)
     const mon_ui_metrics_t *m = mon_ui();
     const sys_sample_t *s = sampler_get();
 
-    mon_page_ui_create(&s_ui, parent, "STORAGE", accent);
+    mon_page_ui_create(&s_ui, parent, "DISK", accent);
 
     s_bar_h = LV_MAX(12, (lv_coord_t)(m->dial_d * 60 / 1000));
     s_track_w = m->stage_w;

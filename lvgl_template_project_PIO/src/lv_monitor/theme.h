@@ -7,7 +7,7 @@
 
 /* ───────────── 数据 ───────────── */
 #define MON_HIST_LEN       60      /* 60 个采样点 = 60 秒 */
-#define MON_PAGE_COUNT     6
+#define MON_PAGE_COUNT     7
 
 /* ───────────── 颜色 ───────────── */
 /* 深色区域一律用纯黑：RGB565 下接近黑色的渐变只有几级灰阶，
@@ -22,11 +22,11 @@
 #define MON_RING           0x2A3542
 #define MON_RING_BRIGHT    0x3C4A5B
 
-#define MON_ACCENT_CPU     0xFF7A59   /* 珊瑚橙 */
+#define MON_ACCENT_CPU     0xFF7A79   /* 珊瑚橙 */
 #define MON_ACCENT_MEM     0x5B9DFF   /* 电光蓝 */
-#define MON_ACCENT_DISK    0xFFC857   /* 琥珀黄 */
+#define MON_ACCENT_DISK    0xB98CFF   /* 鸢尾紫 */
 #define MON_ACCENT_NET     0x4FE3C1   /* 薄荷绿 */
-#define MON_ACCENT_SYS     0xB98CFF   /* 鸢尾紫 */
-#define MON_ACCENT_GPU     0xFF6FA5   /* 玫瑰粉 */
+#define MON_ACCENT_SYS     0xFFC857   /* 琥珀黄 */
+#define MON_ACCENT_GPU     0xFF2535   /* 玫瑰粉 */
 
 #endif /* __MONITOR_THEME_H */

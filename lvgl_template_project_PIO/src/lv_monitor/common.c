@@ -183,6 +183,14 @@ void mon_page_ui_create(mon_page_ui_t *ui, lv_obj_t *parent,
     lv_obj_align(ui->stage, LV_ALIGN_TOP_MID, 0, m->stage_y - m->stage_h / 2);
     make_transparent(ui->stage);
 
+    /* Opaque cover the carousel slides right to wipe a page's chart or
+     * progress bar in from the left. It lives inside the stage so the stage
+     * clips it; pages are built on pure black, so the cover is invisible
+     * except where it hides the stage content. */
+    ui->stage_cover = mon_make_rect(ui->stage, m->stage_w, m->stage_h,
+                                    0, 0, 0, lv_color_hex(MON_BG));
+    lv_obj_add_flag(ui->stage_cover, LV_OBJ_FLAG_HIDDEN);
+
     /* two sub statistics with a hairline divider */
     ui->sub_row = lv_obj_create(ui->root);
     lv_obj_set_size(ui->sub_row, m->sub_w, m->sub_h);
@@ -472,14 +480,14 @@ void mon_chart_draw_cb(lv_event_t *e)
     if (fade_top < obj->coords.y1) fade_top = obj->coords.y1;
     if (fade_top >= obj->coords.y2) fade_top = obj->coords.y2 - 1;
 
-    /* Fade over a fixed share of the chart height instead of down to the
-     * bottom edge: a low curve only has a few pixels of fill, and fading
-     * those few pixels to fully transparent made the shadow invisible. */
-    lv_coord_t chart_h = obj->coords.y2 - obj->coords.y1 + 1;
+    /* The shade runs all the way down to the chart's bottom edge and keeps
+     * a touch of density there, so the fill reads as covering the whole
+     * chart instead of dissolving into black halfway down. Fading to zero
+     * at the ends of a low curve also used to make its shadow invisible. */
     lv_draw_mask_fade_param_t fade_mask;
     lv_draw_mask_fade_init(&fade_mask, &obj->coords,
                            LV_OPA_COVER, fade_top,
-                           LV_OPA_TRANSP, fade_top + chart_h * 3 / 4);
+                           LV_OPA_20, obj->coords.y2);
     int16_t fade_id = lv_draw_mask_add(&fade_mask, NULL);
 
     lv_draw_rect_dsc_t rect_dsc;

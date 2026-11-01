@@ -2,14 +2,15 @@
  * @file main.cpp
  * @brief PC Hardware Monitor — ESP32-S3 + LVGL 8.3
  *
- * Receives JSON frames over WiFi (UDP broadcast) from the PC companion app,
- * with Serial0 (UART0, GPIO 43/44) kept as a wired fallback, and renders the
- * lv_monitor round-dial carousel:
+ * Receives JSON frames over WiFi (UDP broadcast) from the PC companion app
+ * and renders the lv_monitor round-dial carousel:
  * CPU, GPU, MEMORY, STORAGE, NETWORK, SYSTEM.
+ *
+ * UART0 is used for debug logs only, never for data.
  */
 #include <Arduino.h>
+#include "app_settings.h"
 #include "display.h"
-#include "serial_reader.h"
 #include "udp_reader.h"
 #include "data_model.h"
 #include "touch.h"
@@ -28,23 +29,30 @@ void setup()
      * cuts the SoC's dynamic power noticeably versus the 240 MHz default. */
     setCpuFrequencyMhz(160);
 
-    /* Serial0 = Hardware UART0 (GPIO 43 TX, GPIO 44 RX → USB-UART chip) */
-    serial_reader_init(921600);
+    /* Load brightness / carousel timing / WiFi preference before the
+     * subsystems that consume them are initialized. */
+    app_settings_init();
+
+    /* UART0 (GPIO 43 TX / 44 RX) is debug output only. */
+    Serial0.begin(921600);
+
     udp_reader_init();
 
     screen.init();
+    /* Panel and touch must agree on the orientation before the first frame. */
+    app_settings_apply_rotation(app_settings_get()->rotation);
+    display_set_backlight(app_settings_get()->brightness);
     touch_init();
 
     lv_monitor_set_pc_data(&pc_data);
     lv_monitor_show();
 
     Serial0.printf("[Monitor] Build: %s %s\n", __DATE__, __TIME__);
-    Serial0.println("[Monitor] Ready (Serial0 UART).");
+    Serial0.println("[Monitor] Ready.");
 }
 
 void loop()
 {
-    serial_reader_poll(&pc_data);
     udp_reader_poll(&pc_data);
 
     uint32_t now = millis();
@@ -69,8 +77,8 @@ void loop()
             Serial0.printf("[Monitor] Live: %u frames | %lu.%lu FPS\n",
                            pc_data.frame_count, fps_x10 / 10, fps_x10 % 10);
         } else {
-            Serial0.printf("[Monitor] Waiting data... raw=%lu | %lu.%lu FPS\n",
-                           pc_data.raw_bytes, fps_x10 / 10, fps_x10 % 10);
+            Serial0.printf("[Monitor] Waiting data... | %lu.%lu FPS\n",
+                           fps_x10 / 10, fps_x10 % 10);
         }
     }
 

@@ -66,6 +66,11 @@ typedef struct {
 
     uint16_t hist_head;    /* next write position */
     uint32_t sample_count; /* number of completed samples */
+
+    /* Link state — drives the "no data" notice on the dial */
+    bool     link_live;    /* a frame arrived within the last 4 s */
+    bool     link_ever;    /* at least one frame since boot */
+    uint8_t  wifi_state;   /* PC_WIFI_* */
 } sys_sample_t;
 
 void sampler_init(void);

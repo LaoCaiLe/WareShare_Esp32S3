@@ -15,7 +15,7 @@ lv_obj_t *page_mem_create(lv_obj_t *parent, lv_color_t accent)
     const mon_ui_metrics_t *m = mon_ui();
     const sys_sample_t *s = sampler_get();
 
-    mon_page_ui_create(&s_ui, parent, "MEMORY", accent);
+    mon_page_ui_create(&s_ui, parent, "MEM", accent);
 
     s_chart = mon_chart_create(s_ui.stage, m->stage_w, m->stage_h, true);
     s_series = lv_chart_add_series(s_chart, accent, LV_CHART_AXIS_PRIMARY_Y);

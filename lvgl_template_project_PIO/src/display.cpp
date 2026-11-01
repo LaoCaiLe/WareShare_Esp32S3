@@ -33,6 +33,9 @@ TFT_eSPI tft = TFT_eSPI();
 
 static uint32_t s_frame_count = 0;
 
+/* Current TFT_eSPI rotation register: 2 = 180°, 0 = 0°. */
+static uint8_t s_rotation = 2;
+
 /**********************
  *  STATIC PROTOTYPES
  **********************/
@@ -56,6 +59,24 @@ static void disp_flush(lv_disp_drv_t *disp_drv, const lv_area_t *area, lv_color_
 uint32_t display_frame_count(void)
 {
     return s_frame_count;
+}
+
+void display_set_backlight(uint8_t level)
+{
+    ledcWrite(BL_LEDC_CHANNEL, level);
+}
+
+void display_set_rotation(uint8_t flipped)
+{
+    uint8_t rot = flipped ? 2 : 0;
+    if (rot == s_rotation) return;
+    s_rotation = rot;
+
+    tft.setRotation(rot);
+    /* The panel keeps the old image mirrored at the new MADCTL until the
+     * next full draw; wipe it so the flip never shows stale pixels. */
+    tft.fillScreen(TFT_BLACK);
+    lv_obj_invalidate(lv_scr_act());
 }
 
 /**********************

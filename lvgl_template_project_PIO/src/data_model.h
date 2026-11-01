@@ -17,6 +17,11 @@ extern "C" {
 #define DISK_NAME_MAX   16
 #define MAX_DISKS       6
 
+/* WiFi link state written by udp_reader_poll() */
+#define PC_WIFI_OFF        0
+#define PC_WIFI_CONNECTING 1
+#define PC_WIFI_CONNECTED  2
+
 /* CPU info */
 typedef struct {
     char    name[GPU_NAME_MAX];
@@ -77,18 +82,12 @@ typedef struct {
     bool        updated;    /* new data flag, cleared by UI */
     uint32_t    frame_count;/* total frames parsed successfully */
     uint32_t    last_recv_ms;/* millis() when last valid frame received */
+    uint8_t     wifi_state; /* PC_WIFI_OFF / _CONNECTING / _CONNECTED */
 
-    /* Diagnostics — visible on screen to debug serial issues */
-    uint32_t    raw_bytes;  /* total bytes read from Serial */
-    uint32_t    stx_count;  /* number of STX markers detected */
+    /* Diagnostics */
     uint32_t    parse_errs; /* number of JSON parse failures */
-    uint32_t    overflows;  /* number of RX buffer overflows */
-    int16_t     last_frame_len;/* length of last received frame */
-    char        last_err[32];  /* last parse error message */
-    char        raw_preview[96]; /* first ~90 chars of last received frame */
-    uint8_t     usb_mounted;   /* 1 = USB device mounted (enumeration done) */
-    uint8_t     usb_started;   /* 1 = USB.begin() called successfully */
-    char        build_tag[24]; /* firmware build identifier */
+    uint32_t    overflows;  /* number of oversized datagrams dropped */
+    int16_t     last_frame_len; /* length of the last datagram */
 } pc_data_t;
 
 #ifdef __cplusplus
