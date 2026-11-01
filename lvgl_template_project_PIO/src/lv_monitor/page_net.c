@@ -6,6 +6,8 @@
 #include <string.h>
 
 static mon_page_ui_t s_ui;
+
+const mon_page_ui_t *page_net_ui(void) { return &s_ui; }
 static lv_obj_t *s_chart;
 static lv_chart_series_t *s_rx;
 static lv_chart_series_t *s_tx;
@@ -27,7 +29,7 @@ lv_obj_t *page_net_create(lv_obj_t *parent, lv_color_t accent)
 
     mon_page_ui_create(&s_ui, parent, "NETWORK", accent);
 
-    s_chart = mon_chart_create(s_ui.stage, m->stage_w, m->stage_h, false);
+    s_chart = mon_chart_create(s_ui.stage, m->stage_w, m->stage_h, true);
     lv_chart_set_range(s_chart, LV_CHART_AXIS_PRIMARY_Y, 0, 1000);
 
     s_rx = lv_chart_add_series(s_chart, accent, LV_CHART_AXIS_PRIMARY_Y);

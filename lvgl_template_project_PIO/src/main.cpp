@@ -2,13 +2,15 @@
  * @file main.cpp
  * @brief PC Hardware Monitor — ESP32-S3 + LVGL 8.3
  *
- * Receives JSON frames over Serial0 (hardware UART0, GPIO 43/44) from the
- * PC companion app and renders the lv_monitor round-dial carousel:
- * CPU, MEMORY, STORAGE, NETWORK, SYSTEM, GPU.
+ * Receives JSON frames over WiFi (UDP broadcast) from the PC companion app,
+ * with Serial0 (UART0, GPIO 43/44) kept as a wired fallback, and renders the
+ * lv_monitor round-dial carousel:
+ * CPU, GPU, MEMORY, STORAGE, NETWORK, SYSTEM.
  */
 #include <Arduino.h>
 #include "display.h"
 #include "serial_reader.h"
+#include "udp_reader.h"
 #include "data_model.h"
 #include "touch.h"
 #include "lv_monitor/monitor.h"
@@ -22,8 +24,13 @@ static uint32_t last_frame_count = 0;
 
 void setup()
 {
+    /* 160 MHz is plenty for 1 Hz data and the 600 ms page transitions, and
+     * cuts the SoC's dynamic power noticeably versus the 240 MHz default. */
+    setCpuFrequencyMhz(160);
+
     /* Serial0 = Hardware UART0 (GPIO 43 TX, GPIO 44 RX → USB-UART chip) */
     serial_reader_init(921600);
+    udp_reader_init();
 
     screen.init();
     touch_init();
@@ -38,6 +45,7 @@ void setup()
 void loop()
 {
     serial_reader_poll(&pc_data);
+    udp_reader_poll(&pc_data);
 
     uint32_t now = millis();
     /* LVGL's own refresh timer (10 ms) paces frames; poll as often as

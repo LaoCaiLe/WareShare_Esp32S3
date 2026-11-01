@@ -5,6 +5,8 @@
 #include <stdio.h>
 
 static mon_page_ui_t s_ui;
+
+const mon_page_ui_t *page_sys_ui(void) { return &s_ui; }
 static lv_obj_t *s_chart;
 static lv_chart_series_t *s_series;
 
@@ -14,6 +16,10 @@ lv_obj_t *page_sys_create(lv_obj_t *parent, lv_color_t accent)
     const sys_sample_t *s = sampler_get();
 
     mon_page_ui_create(&s_ui, parent, "SYSTEM", accent);
+
+    /* Uptime is 7-8 characters of text, so the numeric hero size used on
+     * the other pages overpowers this page. */
+    mon_page_set_hero_font(&s_ui, &lv_font_montserrat_26);
 
     s_chart = mon_chart_create(s_ui.stage, m->stage_w, m->stage_h, true);
     lv_chart_set_range(s_chart, LV_CHART_AXIS_PRIMARY_Y, 0, 1000);

@@ -2,7 +2,8 @@
 #define __MONITOR_THEME_H
 
 /* ───────────── 时间 ───────────── */
-#define MON_TRANS_MS       720U    /* 转场时长（中心对折） */
+#define MON_PAGE_MS        5000U   /* 自动转场间隔（每页停留 5 秒） */
+#define MON_TRANS_MS       600U    /* 分层转场总时长 */
 
 /* ───────────── 数据 ───────────── */
 #define MON_HIST_LEN       60      /* 60 个采样点 = 60 秒 */

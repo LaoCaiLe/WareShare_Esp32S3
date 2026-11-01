@@ -7,3 +7,6 @@
 # Python
 __pycache__/
 *.pyc
+
+# WiFi password lives here; copy net_config.example.h to net_config.h
+src/net_config.h

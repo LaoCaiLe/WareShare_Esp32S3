@@ -96,7 +96,29 @@ void CST816S::begin(int interrupt) {
   delay(5);
   i2c_read(CST816S_ADDRESS, 0xA7, data.versionInfo, 3);
 
+  /* Register 0xFE DisAutoSleep defaults to 0: two seconds after the last
+     touch the chip sleeps, and the touch that wakes it arrives late or not
+     at all. That is the swipe swallowed right after power-on / flashing. */
+  setAutoSleep(false);
+
   attachInterrupt(_irq, std::bind(&CST816S::handleISR, this), interrupt);
+}
+
+/*!
+    @brief  enable or disable automatic sleep after 2 s without a touch
+*/
+void CST816S::setAutoSleep(bool en) {
+  uint8_t reg = 0;
+  if (i2c_read(CST816S_ADDRESS, 0xFE, &reg, 1) != 0) {
+    reg = 0x01;
+  }
+  if (en) {
+    reg &= (uint8_t)~0x01;
+  }
+  else {
+    reg |= 0x01;
+  }
+  i2c_write(CST816S_ADDRESS, 0xFE, &reg, 1);
 }
 
 /*!

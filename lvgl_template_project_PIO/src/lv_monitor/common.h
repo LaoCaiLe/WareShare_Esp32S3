@@ -21,6 +21,7 @@ typedef struct {
     lv_coord_t hero_y;
     lv_coord_t stage_y;
     lv_coord_t sub_y;
+    lv_coord_t dots_y;
 
     lv_coord_t stage_w;
     lv_coord_t stage_h;
@@ -56,6 +57,7 @@ typedef struct {
     lv_obj_t *stat_caption[2];
     lv_obj_t *note;
     lv_color_t accent;
+    const lv_font_t *hero_font;   /* per-page override; defaults to metrics */
 
     /* animated hero number */
     double hero_current;
@@ -69,6 +71,7 @@ typedef struct {
 void mon_page_ui_create(mon_page_ui_t *ui, lv_obj_t *parent,
                         const char *tag, lv_color_t accent);
 void mon_page_set_hero(mon_page_ui_t *ui, const char *value, const char *unit);
+void mon_page_set_hero_font(mon_page_ui_t *ui, const lv_font_t *font);
 void mon_page_set_hero_value(mon_page_ui_t *ui, double value,
                              uint8_t decimals, const char *unit);
 void mon_page_set_stat(mon_page_ui_t *ui, uint8_t index,
@@ -99,6 +102,9 @@ void mon_fmt_rate_line(uint64_t bytes_per_s, bool compact,
 void mon_fmt_size_pair(uint64_t used_kb, uint64_t total_kb, bool compact,
                        char *buf, size_t buf_sz);
 void mon_fmt_size(uint64_t kb, bool compact, char *buf, size_t buf_sz);
+void mon_fmt_disk_pair(uint64_t used_kb, uint64_t total_kb, bool compact,
+                       char *buf, size_t buf_sz);
+void mon_fmt_disk_size(uint64_t kb, bool compact, char *buf, size_t buf_sz);
 void mon_fmt_uptime(uint64_t seconds, bool compact, char *buf, size_t buf_sz);
 void mon_fmt_freq(uint32_t freq_khz, bool compact, char *buf, size_t buf_sz);
 void mon_fmt_load(uint16_t load_x100, char *buf, size_t buf_sz);

@@ -17,6 +17,14 @@
 #define MY_DISP_HOR_RES   240
 #define MY_DISP_VER_RES   240
 
+/* Backlight PWM. TFT_eSPI only switches TFT_BL fully on; driving it from
+ * LEDC lets the LED run at part duty, which is the second biggest heat
+ * source on this board after the radio. 0..255: lower = dimmer/cooler. */
+#define BL_LEDC_CHANNEL   7
+#define BL_LEDC_FREQ      5000
+#define BL_LEDC_RES       8
+#define BL_LEVEL          160
+
 /**********************
  *  STATIC VARIABLES
  **********************/
@@ -62,7 +70,14 @@ void Display::init(void)
     /* Init GC9A01 LCD via TFT_eSPI */
     tft.begin();
     tft.fillScreen(TFT_BLACK);
-    tft.setRotation(0);
+    /* Rotation 2 = 180°: the panel is mounted upside down in the case.
+     * touch.cpp mirrors the CST816S coordinates to match. */
+    tft.setRotation(2);
+
+    /* Hand the backlight pin from plain GPIO to LEDC and dim it. */
+    ledcSetup(BL_LEDC_CHANNEL, BL_LEDC_FREQ, BL_LEDC_RES);
+    ledcAttachPin(TFT_BL, BL_LEDC_CHANNEL);
+    ledcWrite(BL_LEDC_CHANNEL, BL_LEVEL);
 
     /*-----------------------------
      * Double-buffered drawing buffers

@@ -24,6 +24,7 @@ typedef struct {
     int8_t  temp;           /* Celsius, -1 = unavailable */
     uint16_t freq;          /* MHz */
     uint8_t cores;
+    uint16_t procs;         /* running process count, 0 = unavailable */
 } cpu_info_t;
 
 /* GPU info */
@@ -62,6 +63,7 @@ typedef struct {
     ram_info_t  ram;
     disk_info_t disks[MAX_DISKS];
     uint8_t     disk_count;
+    uint32_t    disk_phys_total_mb; /* all physical disks, MiB, 0 = unavailable */
     uint32_t    uptime;     /* seconds */
     uint32_t    ts;         /* unix timestamp */
     uint32_t    net_up;     /* KB/s upload speed */

@@ -25,6 +25,13 @@ void serial_reader_init(unsigned long baud);
  */
 void serial_reader_poll(pc_data_t *data);
 
+/**
+ * Parse one complete JSON body. Shared by the serial and UDP receivers.
+ * @param json  body bytes (not necessarily NUL-terminated)
+ * @param len   body length
+ */
+bool serial_reader_parse_json(pc_data_t *data, const char *json, size_t len);
+
 #ifdef __cplusplus
 }
 #endif

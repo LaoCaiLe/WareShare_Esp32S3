@@ -5,20 +5,29 @@ Collects CPU/GPU/RAM/Disk data and sends JSON frames over USB Serial
 to ESP32-S3 for real-time LVGL dashboard display.
 
 Usage:
-    python monitor.py COM3           # auto-detect COM port
-    python monitor.py COM3 --dry-run  # print JSON without serial
-    python monitor.py --list          # list available COM ports
+    python monitor.py                # WiFi: broadcast JSON over UDP
+    python monitor.py COM3           # wired fallback: USB serial
+    python monitor.py --dry-run      # print JSON without sending
+    python monitor.py --list         # list available COM ports
 
-Frame format: [STX:0x02][JSON][ETX:0x03]
+UDP datagrams carry the JSON body as-is. Serial frames are wrapped as
+[STX:0x02][JSON][ETX:0x03].
 
 Dependencies: pip install psutil pyserial
+Optional: run LibreHardwareMonitor (as admin) with
+"Options -> Remote Web Server -> Run" for CPU temperature.
 """
 import sys
 import os
 import time
 import json
+import re
+import socket
+import struct
 import subprocess
 import argparse
+import threading
+import urllib.request
 from datetime import datetime
 
 # ============================================================
@@ -27,6 +36,10 @@ from datetime import datetime
 STX = b'\x02'
 ETX = b'\x03'
 BAUD_RATE = 921600
+UDP_PORT = 4210  # keep in sync with NET_UDP_PORT in src/net_config.h
+# Run windowless (pythonw) and every console helper we spawn would pop a new
+# console window — nvidia-smi runs once per frame, so the taskbar flickered.
+CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 INTERVAL = 1.0  # seconds between updates
 
 
@@ -46,21 +59,140 @@ def get_cpu_name():
         return platform.processor()
 
 
+# CPU temperature comes from LibreHardwareMonitor: Windows itself exposes no
+# CPU sensor through psutil, and the ACPI thermal zone on desktop boards
+# (verified here under full load) stays flat. LHM reads the CPU's own thermal
+# sensors and publishes them through its web server (Options -> Remote Web
+# Server -> Run, default port 8085).
+# 127.0.0.1 rather than "localhost": on Windows the IPv6 localhost attempt
+# burns the whole 2 s timeout before falling back to IPv4.
+# Only a failed localhost connect is attempted when LHM is not running, so
+# this probe costs nothing in the normal (LHM closed) case.
+_LHM_URL = "http://127.0.0.1:8085/data.json"
+
+_lhm_temp = None
+_lhm_last_try = 0.0
+_lhm_probing = False
+_LHM_OK_TTL = 10.0     # refresh a good reading every 10 s
+_LHM_FAIL_TTL = 60.0   # retry slowly while LHM is not running
+
+
+_LHM_NUM = re.compile(r"[-+]?\d+(?:[.,]\d+)?")
+
+
+def _lhm_number(value):
+    """Coerce an LHM value: a number, or a formatted string like "52.0 °C"."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        match = _LHM_NUM.search(value)
+        if match:
+            try:
+                return float(match.group(0).replace(",", "."))
+            except ValueError:
+                return None
+    return None
+
+
+def _lhm_temp_from_web():
+    """CPU package temperature from LHM's web server, or None."""
+    try:
+        with urllib.request.urlopen(_LHM_URL, timeout=2) as resp:
+            data = json.load(resp)
+    except Exception:
+        return None
+
+    package = tctl = core_max = None
+    stack = [data]
+    while stack:
+        node = stack.pop()
+        stack.extend(node.get("Children") or ())
+        if node.get("Type") != "Temperature":
+            continue
+        sensor_id = node.get("SensorId", "")
+        if not (sensor_id.startswith("/intelcpu/")
+                or sensor_id.startswith("/amdcpu/")):
+            continue
+        name = node.get("Text", "")
+        # "Distance to TjMax" is thermal headroom, not a temperature.
+        if "Distance" in name:
+            continue
+        # Older LHM builds emit RawValue as a number; newer ones emit a
+        # formatted string, so parse both.
+        raw = _lhm_number(node.get("RawValue"))
+        if raw is None:
+            raw = _lhm_number(node.get("Value"))
+        if raw is None or raw <= 0:
+            continue
+        if "Package" in name:
+            package = max(package or 0.0, raw)
+        elif "Tctl" in name or "Tdie" in name:
+            tctl = max(tctl or 0.0, raw)
+        else:
+            core_max = max(core_max or 0.0, raw)
+
+    if package is not None:
+        return package
+    if tctl is not None:
+        return tctl
+    return core_max
+
+
+def _refresh_lhm_temp():
+    """Probe LHM once and update the cached temperature."""
+    global _lhm_temp, _lhm_last_try, _lhm_probing
+    try:
+        value = _lhm_temp_from_web()
+        if value is not None:
+            value = int(round(value))
+            if not (0 < value < 127):   # ESP32 keeps this in an int8_t
+                value = None
+        _lhm_temp = value
+    finally:
+        _lhm_last_try = time.time()
+        _lhm_probing = False
+
+
+def get_cpu_temp_c():
+    """CPU package temperature in Celsius, or None if LHM is not available.
+
+    Requires LibreHardwareMonitor running in the background (as admin);
+    its kernel driver is what actually reads the CPU's thermal sensors.
+    Probing happens on a worker thread so a missing LHM never stalls the
+    one-second send loop.
+    """
+    global _lhm_probing
+
+    now = time.time()
+    ttl = _LHM_OK_TTL if _lhm_temp is not None else _LHM_FAIL_TTL
+    if not _lhm_probing and now - _lhm_last_try >= ttl:
+        _lhm_probing = True
+        threading.Thread(target=_refresh_lhm_temp, daemon=True).start()
+    return _lhm_temp
+
+
 def get_cpu_data():
-    """Collect CPU usage, frequency, cores."""
+    """Collect CPU usage, frequency, cores, temperature, process count."""
     import psutil
 
     usage = psutil.cpu_percent(interval=0.5)
     freq_info = psutil.cpu_freq()
     freq = round(freq_info.current) if freq_info else 0
     cores = psutil.cpu_count(logical=True)
+    temp = get_cpu_temp_c()
+    # No CPU temperature without a driver-backed helper, so the device
+    # shows the process count in that slot instead.
+    procs = len(psutil.pids())
 
     return {
         "name": get_cpu_name(),
         "usage": round(usage, 1),
-        "temp": -1,     # Desktop CPUs typically don't expose temp via WMI
+        "temp": temp if temp is not None else -1,
         "freq": freq,
         "cores": cores,
+        "procs": procs,
     }
 
 
@@ -73,7 +205,8 @@ def get_gpu_data():
                 "--query-gpu=name,temperature.gpu,utilization.gpu,memory.used,memory.total,power.draw,clocks.current.graphics,clocks.current.memory,fan.speed",
                 "--format=csv,noheader,nounits"
             ],
-            capture_output=True, text=True, timeout=8
+            capture_output=True, text=True, timeout=8,
+            creationflags=CREATE_NO_WINDOW
         )
         if result.returncode != 0:
             return None
@@ -144,8 +277,8 @@ def get_disk_data():
     import psutil
     disks = []
     for part in psutil.disk_partitions():
-        # Only fixed disks (skip removable, CD-ROM)
-        if 'fixed' not in part.opts.lower() and 'cdrom' in part.opts.lower():
+        # Only fixed disks (skip removable, CD-ROM, network drives)
+        if 'fixed' not in part.opts.lower():
             continue
         try:
             usage = psutil.disk_usage(part.mountpoint)
@@ -158,6 +291,31 @@ def get_disk_data():
         except:
             pass
     return disks
+
+
+_disk_phys_total_mb = None
+
+
+def get_disk_phys_total_mb():
+    """Total capacity of the physical disks, in MiB.
+
+    Volume totals skip recovery/ESP partitions and unmounted space, so they
+    read lower than the drives' rated capacity. Queried once — the disks do
+    not change while the companion is running.
+    """
+    global _disk_phys_total_mb
+    if _disk_phys_total_mb is None:
+        try:
+            out = subprocess.check_output(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                 "[uint64]((Get-CimInstance Win32_DiskDrive | "
+                 "Measure-Object Size -Sum).Sum)"],
+                text=True, timeout=10,
+                creationflags=CREATE_NO_WINDOW).strip()
+            _disk_phys_total_mb = int(out) // (1024 * 1024)
+        except Exception:
+            _disk_phys_total_mb = 0
+    return _disk_phys_total_mb
 
 
 def get_uptime():
@@ -209,6 +367,7 @@ def collect_all():
         "gpu": get_gpu_data(),
         "ram": get_ram_data(),
         "disk": get_disk_data(),
+        "disk_phys_total": get_disk_phys_total_mb(),
         "net": get_net_speed(),
         "loadavg": get_loadavg(),
         "uptime": get_uptime(),
@@ -216,8 +375,76 @@ def collect_all():
 
 
 # ============================================================
-# Serial Communication
+# Transport (UDP broadcast / USB serial)
 # ============================================================
+
+def get_broadcast_targets():
+    """Directed broadcast address of every active IPv4 interface.
+
+    Sending to each LAN's own broadcast (e.g. 192.168.10.255) reaches the
+    dial regardless of which interface Windows picks for 255.255.255.255.
+    APIPA (169.254.x.x) and loopback interfaces are skipped.
+    """
+    import psutil
+
+    targets = set()
+    for addrs in psutil.net_if_addrs().values():
+        for addr in addrs:
+            if addr.family != socket.AF_INET or not addr.netmask:
+                continue
+            if addr.address.startswith(("127.", "169.254.")):
+                continue
+            try:
+                ip = struct.unpack("!I", socket.inet_aton(addr.address))[0]
+                mask = struct.unpack("!I", socket.inet_aton(addr.netmask))[0]
+            except OSError:
+                continue
+            bcast = ip | (~mask & 0xFFFFFFFF)
+            targets.add(socket.inet_ntoa(struct.pack("!I", bcast)))
+
+    if not targets:
+        targets.add("255.255.255.255")
+    return sorted(targets)
+
+
+def run_udp(port=UDP_PORT):
+    """Main loop: collect data and broadcast it over UDP."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+
+    targets = get_broadcast_targets()
+    print(f"Broadcasting UDP on port {port} to: {', '.join(targets)}")
+    print("Press Ctrl+C to stop.\n")
+
+    frame_count = 0
+    try:
+        while True:
+            data = collect_all()
+            payload = json.dumps(data, ensure_ascii=False).encode("utf-8")
+            for target in targets:
+                try:
+                    sock.sendto(payload, (target, port))
+                except OSError:
+                    pass  # interface went away; refreshed below
+            frame_count += 1
+
+            # Interfaces come and go (WiFi on/off, VPN); refresh occasionally.
+            if frame_count % 10 == 0:
+                targets = get_broadcast_targets()
+
+            cpu_str = f"CPU {data['cpu']['usage']}%"
+            gpu_str = (f"GPU {data['gpu']['temp']}°C {data['gpu']['usage']}%"
+                       if data['gpu'] else "GPU N/A")
+            ram_str = (f"RAM {data['ram']['used']/1024:.1f}/"
+                       f"{data['ram']['total']/1024:.1f}G")
+            print(f"[{frame_count:04d}] {cpu_str} | {gpu_str} | {ram_str} | "
+                  f"{len(payload)}B", end='\r')
+
+            time.sleep(INTERVAL)
+    except KeyboardInterrupt:
+        print(f"\n\nStopped. Sent {frame_count} frames.")
+    finally:
+        sock.close()
 
 def list_ports():
     """List available COM ports."""
@@ -332,14 +559,21 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python monitor.py COM3            Send data to ESP32 on COM3
-  python monitor.py COM3 --dry-run  Print JSON without serial
+  python monitor.py                 Broadcast over WiFi (UDP)
+  python monitor.py COM3            Send over USB serial to COM3
+  python monitor.py --dry-run       Print JSON without sending
   python monitor.py --list          List available COM ports
         """
     )
-    parser.add_argument("port", nargs="?", help="COM port (e.g., COM3)")
+    parser.add_argument("port", nargs="?",
+                        help="COM port for wired serial mode; omit to "
+                             "broadcast over WiFi/UDP")
+    parser.add_argument("--udp", action="store_true",
+                        help="force WiFi UDP broadcast")
+    parser.add_argument("--udp-port", type=int, default=UDP_PORT,
+                        help=f"UDP broadcast port (default: {UDP_PORT})")
     parser.add_argument("--dry-run", action="store_true",
-                        help="Print JSON to console, don't use serial")
+                        help="Print JSON to console, don't send")
     parser.add_argument("--list", action="store_true",
                         help="List available COM ports and exit")
     parser.add_argument("--interval", type=float, default=INTERVAL,
@@ -356,10 +590,9 @@ Examples:
         run_dry_run()
         return
 
-    if not args.port:
-        parser.print_help()
-        print("\nError: COM port required (e.g., COM3)")
-        sys.exit(1)
+    if args.udp or not args.port:
+        run_udp(args.udp_port)
+        return
 
     run_serial(args.port)
 

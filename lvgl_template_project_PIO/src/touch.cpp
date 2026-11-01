@@ -57,6 +57,12 @@ static void touch_poll_cb(lv_timer_t *timer)
         return;
     }
 
+    /* The display runs at rotation 2 (180°), so mirror the raw panel
+     * coordinates into the same visual space the user sees. Swipe direction
+     * then keeps its on-screen meaning (finger left = previous page). */
+    x = TOUCH_PANEL_MAX - 1 - x;
+    y = TOUCH_PANEL_MAX - 1 - y;
+
     bool pressed = (points > 0);
 
     if (pressed) {

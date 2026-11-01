@@ -104,6 +104,7 @@ static void sample_once(void)
     s_sample.cpu_freq_khz = (p->cpu.freq > 0U)
                             ? (uint32_t)p->cpu.freq * 1000U
                             : SYS_FREQ_UNKNOWN;
+    s_sample.cpu_procs = p->cpu.procs;
     s_sample.uptime_sec = p->uptime;
 
     /* Memory --------------------------------------------------------- */
@@ -131,9 +132,20 @@ static void sample_once(void)
 
         if (used_mb > total_mb) used_mb = total_mb;
 
+        uint64_t avail_mb = total_mb - used_mb;
+
+        /* Mounted volumes miss recovery and unmounted partitions, so their
+         * sum reads below the drives' rated capacity. Prefer the physical
+         * total the PC reports; whatever the volumes don't cover (hidden
+         * partitions, unallocated space) counts as used. */
+        if (p->disk_phys_total_mb > total_mb) {
+            total_mb = p->disk_phys_total_mb;
+            used_mb = total_mb - avail_mb;
+        }
+
         s_sample.disk_total_kb = total_mb * 1024ULL;
         s_sample.disk_used_kb = used_mb * 1024ULL;
-        s_sample.disk_avail_kb = (total_mb - used_mb) * 1024ULL;
+        s_sample.disk_avail_kb = avail_mb * 1024ULL;
         s_sample.disk_load = (total_mb > 0)
                              ? (uint16_t)(used_mb * 100ULL / total_mb)
                              : 0U;

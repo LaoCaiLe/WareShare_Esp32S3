@@ -59,6 +59,7 @@ class CST816S {
     CST816S(int sda, int scl, int rst, int irq);
     void begin(int interrupt = RISING);
     void sleep();
+    void setAutoSleep(bool en);
     bool available();
     data_struct data;
     String gesture();

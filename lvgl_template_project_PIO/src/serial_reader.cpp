@@ -43,20 +43,13 @@ void serial_reader_init(unsigned long baud)
 }
 
 /**
- * Parse a complete JSON frame from rx_buf[rx_tail..rx_head)
+ * Parse one complete JSON body. Also used by the UDP receiver.
  * Returns: true if parsing succeeded, false otherwise.
  */
-static bool parse_frame(pc_data_t *data, uint16_t len)
+bool serial_reader_parse_json(pc_data_t *data, const char *json, size_t len)
 {
-    /* Null-terminate for ArduinoJson */
-    if (len >= RX_BUF_SIZE) len = RX_BUF_SIZE - 1;
-    rx_buf[rx_tail + len] = '\0';
-
-    /* Deserialize — JSON is small (~400 bytes), no filter needed */
-    DeserializationError err = deserializeJson(
-        json_doc,
-        (const char *)(rx_buf + rx_tail)
-    );
+    /* Deserialize — JSON is small (~1 KB), no filter needed */
+    DeserializationError err = deserializeJson(json_doc, json, len);
 
     if (err) {
         data->parse_errs++;
@@ -68,8 +61,8 @@ static bool parse_frame(pc_data_t *data, uint16_t len)
         Serial.println(err.c_str());
         /* Dump first 64 chars of raw data */
         char preview[65];
-        uint16_t plen = len < 64 ? len : 64;
-        memcpy(preview, rx_buf + rx_tail, plen);
+        size_t plen = len < 64 ? len : 64;
+        memcpy(preview, json, plen);
         preview[plen] = '\0';
         Serial.print("[JSON] raw: ");
         Serial.println(preview);
@@ -82,10 +75,16 @@ static bool parse_frame(pc_data_t *data, uint16_t len)
         const char *name = cpu["name"] | "";
         strncpy(data->cpu.name, name, GPU_NAME_MAX - 1);
         data->cpu.name[GPU_NAME_MAX - 1] = '\0';
-        data->cpu.usage = cpu["usage"] | 0;
+        /* The companion sends usage as a float (e.g. 25.4); ArduinoJson
+         * refuses float -> int with `| 0` and silently yields the default. */
+        float usage = cpu["usage"] | 0.0f;
+        if (usage < 0.0f) usage = 0.0f;
+        if (usage > 100.0f) usage = 100.0f;
+        data->cpu.usage = (uint8_t)(usage + 0.5f);
         data->cpu.temp  = cpu["temp"] | -1;
         data->cpu.freq  = cpu["freq"] | 0;
         data->cpu.cores = cpu["cores"] | 0;
+        data->cpu.procs = cpu["procs"] | 0;
     }
 
     /* --- Parse GPU --- */
@@ -129,6 +128,7 @@ static bool parse_frame(pc_data_t *data, uint16_t len)
             data->disk_count++;
         }
     }
+    data->disk_phys_total_mb = json_doc["disk_phys_total"] | 0;
 
     /* --- Parse network (optional) --- */
     JsonObject net = json_doc["net"];
@@ -162,9 +162,9 @@ static bool parse_frame(pc_data_t *data, uint16_t len)
 
     /* Save raw preview for on-screen debug */
     {
-        uint16_t plen = len < (sizeof(data->raw_preview) - 1)
-                        ? len : (sizeof(data->raw_preview) - 1);
-        memcpy(data->raw_preview, rx_buf + rx_tail, plen);
+        size_t plen = len < (sizeof(data->raw_preview) - 1)
+                      ? len : (sizeof(data->raw_preview) - 1);
+        memcpy(data->raw_preview, json, plen);
         data->raw_preview[plen] = '\0';
     }
 
@@ -201,7 +201,7 @@ void serial_reader_poll(pc_data_t *data)
             /* Got a complete frame */
             if (rx_head > 0) {
                 data->last_frame_len = (int16_t)rx_head;
-                parse_frame(data, rx_head);
+                serial_reader_parse_json(data, (const char *)rx_buf, rx_head);
             }
             continue;
         }

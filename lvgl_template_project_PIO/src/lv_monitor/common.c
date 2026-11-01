@@ -4,6 +4,10 @@
 #include <stdio.h>
 #include <string.h>
 
+/* 10 px Montserrat Bold subset generated with lv_font_conv; the stock
+ * LVGL Montserrat fonts are regular weight only. */
+LV_FONT_DECLARE(font_cap_bold);
+
 /* ─────────────────────────── metrics ─────────────────────────── */
 
 static mon_ui_metrics_t s_ui;
@@ -32,9 +36,10 @@ void mon_ui_init(void)
     s_ui.hero_y = (lv_coord_t)(d * 400 / 1000);
     s_ui.stage_y = (lv_coord_t)(d * 630 / 1000);
     s_ui.sub_y = (lv_coord_t)(d * 795 / 1000);
+    s_ui.dots_y = (lv_coord_t)(d * 905 / 1000);
     s_ui.stage_w = (lv_coord_t)(d * 720 / 1000);
     s_ui.stage_h = (lv_coord_t)(d * (d >= 400 ? 200 : (d >= 300 ? 180 : 165)) / 1000);
-    s_ui.sub_w = (lv_coord_t)(d * 720 / 1000);
+    s_ui.sub_w = (lv_coord_t)(d * 740 / 1000);
 
     if (d >= 400) {
         s_ui.font_hero = &lv_font_montserrat_48;
@@ -61,13 +66,13 @@ void mon_ui_init(void)
         s_ui.font_note = &lv_font_montserrat_10;
     }
     else {
-        s_ui.font_hero = &lv_font_montserrat_26;
-        s_ui.font_unit = &lv_font_montserrat_16;
+        s_ui.font_hero = &lv_font_montserrat_36;
+        s_ui.font_unit = &lv_font_montserrat_18;
         /* The page name is the main orientation cue on a 240 px dial —
          * 10-12 px reads as a faint smudge at arm's length. */
         s_ui.font_tag = &lv_font_montserrat_16;
-        s_ui.font_sub_value = &lv_font_montserrat_14;
-        s_ui.font_sub_cap = &lv_font_montserrat_10;
+        s_ui.font_sub_value = &lv_font_montserrat_16;
+        s_ui.font_sub_cap = &font_cap_bold;
         s_ui.font_note = &lv_font_montserrat_10;
     }
 
@@ -127,15 +132,12 @@ void mon_page_ui_create(mon_page_ui_t *ui, lv_obj_t *parent,
 
     memset(ui, 0, sizeof(*ui));
     ui->accent = accent;
+    ui->hero_font = m->font_hero;
 
     ui->root = lv_obj_create(parent);
     lv_obj_set_size(ui->root, d, d);
     lv_obj_set_pos(ui->root, 0, 0);
     make_transparent(ui->root);
-
-    /* Rotate the whole page around the dial centre during page transitions. */
-    lv_obj_set_style_transform_pivot_x(ui->root, d / 2, 0);
-    lv_obj_set_style_transform_pivot_y(ui->root, d / 2, 0);
 
     /* tag row: accent dot + uppercase label */
     lv_coord_t tag_h = m->font_tag->line_height + 6;
@@ -159,7 +161,7 @@ void mon_page_ui_create(mon_page_ui_t *ui, lv_obj_t *parent,
     lv_obj_set_style_text_letter_space(ui->tag_label, 2, 0);
 
     /* hero number + unit */
-    lv_coord_t hero_h = m->font_hero->line_height + 8;
+    lv_coord_t hero_h = ui->hero_font->line_height + 8;
     ui->hero_box = lv_obj_create(ui->root);
     lv_obj_set_size(ui->hero_box, (lv_coord_t)(d * 840 / 1000), hero_h);
     lv_obj_align(ui->hero_box, LV_ALIGN_TOP_MID, 0, m->hero_y - hero_h / 2);
@@ -167,7 +169,7 @@ void mon_page_ui_create(mon_page_ui_t *ui, lv_obj_t *parent,
 
     ui->hero_value = lv_label_create(ui->hero_box);
     lv_label_set_text(ui->hero_value, "0");
-    lv_obj_set_style_text_font(ui->hero_value, m->font_hero, 0);
+    lv_obj_set_style_text_font(ui->hero_value, ui->hero_font, 0);
     lv_obj_set_style_text_color(ui->hero_value, lv_color_hex(MON_TEXT), 0);
 
     ui->hero_unit = lv_label_create(ui->hero_box);
@@ -190,7 +192,7 @@ void mon_page_ui_create(mon_page_ui_t *ui, lv_obj_t *parent,
     lv_obj_set_flex_align(ui->sub_row, LV_FLEX_ALIGN_SPACE_EVENLY,
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-    lv_coord_t block_w = (lv_coord_t)(m->sub_w * 45 / 100);
+    lv_coord_t block_w = (lv_coord_t)(m->sub_w * 48 / 100);
 
     for (int i = 0; i < 2; i++) {
         lv_obj_t *block = lv_obj_create(ui->sub_row);
@@ -249,7 +251,7 @@ void mon_page_set_hero(mon_page_ui_t *ui, const char *value, const char *unit)
     lv_point_t num_size = {0, 0};
     lv_point_t unit_size = {0, 0};
 
-    lv_txt_get_size(&num_size, v, m->font_hero, 0, 0, LV_COORD_MAX,
+    lv_txt_get_size(&num_size, v, ui->hero_font, 0, 0, LV_COORD_MAX,
                     LV_TEXT_FLAG_NONE);
     if (u[0] != '\0') {
         lv_txt_get_size(&unit_size, u, m->font_unit, 0, 0, LV_COORD_MAX,
@@ -267,7 +269,7 @@ void mon_page_set_hero(mon_page_ui_t *ui, const char *value, const char *unit)
     lv_obj_set_pos(ui->hero_value, x, top);
 
     lv_coord_t unit_y = top +
-        (m->font_hero->line_height - m->font_unit->line_height) * 4 / 5;
+        (ui->hero_font->line_height - m->font_unit->line_height) * 4 / 5;
     if (unit_y < 0) unit_y = 0;
     if (unit_y + m->font_unit->line_height > box_h) {
         unit_y = box_h - m->font_unit->line_height;
@@ -275,6 +277,22 @@ void mon_page_set_hero(mon_page_ui_t *ui, const char *value, const char *unit)
     }
 
     lv_obj_set_pos(ui->hero_unit, x + num_size.x + gap, unit_y);
+}
+
+void mon_page_set_hero_font(mon_page_ui_t *ui, const lv_font_t *font)
+{
+    if (ui == NULL || font == NULL) return;
+
+    const mon_ui_metrics_t *m = mon_ui();
+    ui->hero_font = font;
+
+    lv_obj_set_style_text_font(ui->hero_value, font, 0);
+
+    /* The hero box was sized for the default font: shrink it and keep it
+     * centred on the same line so the text does not drift upwards. */
+    lv_coord_t hero_h = font->line_height + 8;
+    lv_obj_set_height(ui->hero_box, hero_h);
+    lv_obj_align(ui->hero_box, LV_ALIGN_TOP_MID, 0, m->hero_y - hero_h / 2);
 }
 
 static void hero_value_render(mon_page_ui_t *ui, double value)
@@ -434,6 +452,11 @@ void mon_chart_draw_cb(lv_event_t *e)
 
     lv_obj_t *obj = lv_event_get_target(e);
 
+    /* Fill only the primary series: on a two-series chart (NETWORK RX/TX)
+     * two stacked translucent fills muddy the colour. */
+    lv_chart_series_t *first = lv_chart_get_series_next(obj, NULL);
+    if (dsc->sub_part_ptr != first) return;
+
     /* Soft gradient area under the line. */
     lv_draw_mask_line_param_t line_mask;
     lv_draw_mask_line_points_init(&line_mask,
@@ -442,16 +465,26 @@ void mon_chart_draw_cb(lv_event_t *e)
                                   LV_DRAW_MASK_LINE_SIDE_BOTTOM);
     int16_t line_id = lv_draw_mask_add(&line_mask, NULL);
 
-    lv_coord_t h = lv_obj_get_height(obj);
+    /* Anchor the fade at this segment's own top, not at the chart top.
+     * With a chart-wide fade a low curve (idle CPU, low load) sits in the
+     * almost-transparent end of the gradient and the shadow disappears. */
+    lv_coord_t fade_top = LV_MIN(dsc->p1->y, dsc->p2->y);
+    if (fade_top < obj->coords.y1) fade_top = obj->coords.y1;
+    if (fade_top >= obj->coords.y2) fade_top = obj->coords.y2 - 1;
+
+    /* Fade over a fixed share of the chart height instead of down to the
+     * bottom edge: a low curve only has a few pixels of fill, and fading
+     * those few pixels to fully transparent made the shadow invisible. */
+    lv_coord_t chart_h = obj->coords.y2 - obj->coords.y1 + 1;
     lv_draw_mask_fade_param_t fade_mask;
     lv_draw_mask_fade_init(&fade_mask, &obj->coords,
-                           LV_OPA_COVER, obj->coords.y1 + h / 8,
-                           LV_OPA_TRANSP, obj->coords.y2);
+                           LV_OPA_COVER, fade_top,
+                           LV_OPA_TRANSP, fade_top + chart_h * 3 / 4);
     int16_t fade_id = lv_draw_mask_add(&fade_mask, NULL);
 
     lv_draw_rect_dsc_t rect_dsc;
     lv_draw_rect_dsc_init(&rect_dsc);
-    rect_dsc.bg_opa = LV_OPA_20;
+    rect_dsc.bg_opa = LV_OPA_40;
     rect_dsc.bg_color = dsc->line_dsc->color;
 
     lv_area_t area = {
@@ -525,7 +558,11 @@ void mon_fmt_size_pair(uint64_t used_kb, uint64_t total_kb, bool compact,
     double div;
     const char *unit;
 
-    if (total_kb >= 1024ULL * 1024ULL) {
+    if (total_kb >= 1024ULL * 1024ULL * 1024ULL) {
+        div = 1024.0 * 1024.0 * 1024.0;
+        unit = compact ? "T" : "TB";
+    }
+    else if (total_kb >= 1024ULL * 1024ULL) {
         div = 1024.0 * 1024.0;
         unit = compact ? "G" : "GB";
     }
@@ -552,7 +589,11 @@ void mon_fmt_size(uint64_t kb, bool compact, char *buf, size_t buf_sz)
     double div;
     const char *unit;
 
-    if (kb >= 1024ULL * 1024ULL) {
+    if (kb >= 1024ULL * 1024ULL * 1024ULL) {
+        div = 1024.0 * 1024.0 * 1024.0;
+        unit = compact ? "T" : "TB";
+    }
+    else if (kb >= 1024ULL * 1024ULL) {
         div = 1024.0 * 1024.0;
         unit = compact ? "G" : "GB";
     }
@@ -570,6 +611,62 @@ void mon_fmt_size(uint64_t kb, bool compact, char *buf, size_t buf_sz)
     snprintf(buf, buf_sz, compact ? "%s%s" : "%s %s", num, unit);
 }
 
+/* Disk capacities follow the drive labels, where 1 TB = 1000^4 bytes, so a
+ * 2 TB + 2 TB + 500 GB machine reads 4.5T. The other formatters keep the
+ * binary units used for memory and network counters. */
+static void fmt_disk_units(double total_bytes, double *div, const char **unit,
+                           bool compact)
+{
+    if (total_bytes >= 1e12) {
+        *div = 1e12;
+        *unit = compact ? "T" : "TB";
+    }
+    else if (total_bytes >= 1e9) {
+        *div = 1e9;
+        *unit = compact ? "G" : "GB";
+    }
+    else if (total_bytes >= 1e6) {
+        *div = 1e6;
+        *unit = compact ? "M" : "MB";
+    }
+    else {
+        *div = 1e3;
+        *unit = compact ? "K" : "KB";
+    }
+}
+
+void mon_fmt_disk_pair(uint64_t used_kb, uint64_t total_kb, bool compact,
+                       char *buf, size_t buf_sz)
+{
+    double used = (double)used_kb * 1024.0;
+    double total = (double)total_kb * 1024.0;
+
+    double div = 1e3;
+    const char *unit = compact ? "K" : "KB";
+    fmt_disk_units(total, &div, &unit, compact);
+
+    char used_buf[24];
+    char total_buf[24];
+    fmt_short_num(used / div, used_buf, sizeof(used_buf));
+    fmt_short_num(total / div, total_buf, sizeof(total_buf));
+
+    snprintf(buf, buf_sz, compact ? "%s/%s%s" : "%s / %s %s",
+             used_buf, total_buf, unit);
+}
+
+void mon_fmt_disk_size(uint64_t kb, bool compact, char *buf, size_t buf_sz)
+{
+    double bytes = (double)kb * 1024.0;
+
+    double div = 1e3;
+    const char *unit = compact ? "K" : "KB";
+    fmt_disk_units(bytes, &div, &unit, compact);
+
+    char num[24];
+    fmt_short_num(bytes / div, num, sizeof(num));
+    snprintf(buf, buf_sz, compact ? "%s%s" : "%s %s", num, unit);
+}
+
 void mon_fmt_uptime(uint64_t seconds, bool compact, char *buf, size_t buf_sz)
 {
     uint32_t days = (uint32_t)(seconds / 86400ULL);
@@ -580,7 +677,7 @@ void mon_fmt_uptime(uint64_t seconds, bool compact, char *buf, size_t buf_sz)
         snprintf(buf, buf_sz, compact ? "%ud%uh" : "%ud %uh", days, hours);
     }
     else if (hours > 0) {
-        snprintf(buf, buf_sz, compact ? "%uh%um" : "%uh %um", hours, minutes);
+        snprintf(buf, buf_sz, "%uh %um", hours, minutes);
     }
     else {
         snprintf(buf, buf_sz, "%um", minutes);

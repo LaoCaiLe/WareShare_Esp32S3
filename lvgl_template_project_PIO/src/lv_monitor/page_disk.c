@@ -5,6 +5,8 @@
 #include <stdio.h>
 
 static mon_page_ui_t s_ui;
+
+const mon_page_ui_t *page_disk_ui(void) { return &s_ui; }
 static lv_obj_t *s_track;
 static lv_obj_t *s_fill;
 static lv_coord_t s_track_w;
@@ -70,9 +72,9 @@ void page_disk_update(const sys_sample_t *s)
 
     mon_page_set_hero_value(&s_ui, (double)s->disk_load, 0, "%");
 
-    mon_fmt_size_pair(s->disk_used_kb, s->disk_total_kb, m->compact,
+    mon_fmt_disk_pair(s->disk_used_kb, s->disk_total_kb, m->compact,
                       used, sizeof(used));
-    mon_fmt_size(s->disk_avail_kb, m->compact, free_kb, sizeof(free_kb));
+    mon_fmt_disk_size(s->disk_avail_kb, m->compact, free_kb, sizeof(free_kb));
 
     mon_page_set_stat(&s_ui, 0, used, "USED");
     mon_page_set_stat(&s_ui, 1, free_kb, "FREE");

@@ -19,6 +19,7 @@ typedef struct {
     uint16_t cpu_load;             /* 0..100, smoothed */
     uint32_t cpu_temp_c;           /* SYS_TEMP_UNKNOWN if unavailable */
     uint32_t cpu_freq_khz;         /* 0 if unavailable */
+    uint16_t cpu_procs;            /* running process count, 0 if unavailable */
 
     /* Memory */
     uint16_t mem_load;

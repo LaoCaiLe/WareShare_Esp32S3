@@ -5,6 +5,8 @@
 #include <stdio.h>
 
 static mon_page_ui_t s_ui;
+
+const mon_page_ui_t *page_mem_ui(void) { return &s_ui; }
 static lv_obj_t *s_chart;
 static lv_chart_series_t *s_series;
 
