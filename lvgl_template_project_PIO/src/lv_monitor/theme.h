@@ -22,7 +22,7 @@
 #define MON_RING           0x2A3542
 #define MON_RING_BRIGHT    0x3C4A5B
 
-#define MON_ACCENT_CPU     0xFF7A79   /* 珊瑚橙 */
+#define MON_ACCENT_CPU     0xEA3680  /* 珊瑚橙 */
 #define MON_ACCENT_MEM     0x5B9DFF   /* 电光蓝 */
 #define MON_ACCENT_DISK    0xB98CFF   /* 鸢尾紫 */
 #define MON_ACCENT_NET     0x4FE3C1   /* 薄荷绿 */

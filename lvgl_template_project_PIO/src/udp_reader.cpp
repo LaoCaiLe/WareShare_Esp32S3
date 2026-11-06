@@ -16,6 +16,7 @@
 
 #include "app_settings.h"
 #include "net_config.h"
+#include "time_keeper.h"
 
 static WiFiUDP s_udp;
 static bool s_udp_started;
@@ -160,6 +161,9 @@ static void wifi_log_state(wl_status_t status)
     Serial0.printf("[WiFi] %s", text);
     if (status == WL_CONNECTED) {
         Serial0.printf(" %s", WiFi.localIP().toString().c_str());
+        /* The dial needs the time even when the PC companion is not
+         * running, so bring SNTP up together with the link. */
+        time_keeper_start_sntp();
     }
     Serial0.println();
 }

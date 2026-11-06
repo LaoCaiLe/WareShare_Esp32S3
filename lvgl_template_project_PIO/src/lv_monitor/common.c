@@ -37,6 +37,7 @@ void mon_ui_init(void)
     s_ui.stage_y = (lv_coord_t)(d * 630 / 1000);
     s_ui.sub_y = (lv_coord_t)(d * 795 / 1000);
     s_ui.dots_y = (lv_coord_t)(d * 905 / 1000);
+    s_ui.dot_size = LV_MAX(3, (lv_coord_t)(d / 90));
     s_ui.stage_w = (lv_coord_t)(d * 720 / 1000);
     s_ui.stage_h = (lv_coord_t)(d * (d >= 400 ? 200 : (d >= 300 ? 180 : 165)) / 1000);
     s_ui.sub_w = (lv_coord_t)(d * 740 / 1000);
@@ -211,7 +212,25 @@ void mon_page_ui_create(mon_page_ui_t *ui, lv_obj_t *parent,
                               LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
         lv_obj_set_style_pad_row(block, 2, 0);
 
-        ui->stat_value[i] = lv_label_create(block);
+        /* Value + optional direction glyph share a row so an icon can sit
+         * right before the number without shifting the caption below. */
+        lv_obj_t *value_row = lv_obj_create(block);
+        lv_obj_set_size(value_row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+        make_transparent(value_row);
+        lv_obj_set_flex_flow(value_row, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(value_row, LV_FLEX_ALIGN_CENTER,
+                              LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_style_pad_column(value_row, 3, 0);
+
+        ui->stat_icon[i] = lv_label_create(value_row);
+        lv_label_set_text(ui->stat_icon[i], "");
+        /* Stock font: the custom caption face is an ASCII-only subset. */
+        lv_obj_set_style_text_font(ui->stat_icon[i], &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(ui->stat_icon[i],
+                                    lv_color_hex(MON_TEXT_DIM), 0);
+        lv_obj_add_flag(ui->stat_icon[i], LV_OBJ_FLAG_HIDDEN);
+
+        ui->stat_value[i] = lv_label_create(value_row);
         lv_label_set_text(ui->stat_value[i], "--");
         lv_obj_set_style_text_font(ui->stat_value[i], m->font_sub_value, 0);
         lv_obj_set_style_text_color(ui->stat_value[i], lv_color_hex(MON_TEXT), 0);
@@ -371,6 +390,25 @@ void mon_page_set_stat(mon_page_ui_t *ui, uint8_t index,
     set_text_if_changed(ui->stat_caption[index], caption);
 }
 
+void mon_page_set_stat_icon(mon_page_ui_t *ui, uint8_t index,
+                            const char *symbol, lv_color_t color)
+{
+    if (ui == NULL || index >= 2) return;
+
+    if (symbol == NULL || symbol[0] == '\0') {
+        if (!lv_obj_has_flag(ui->stat_icon[index], LV_OBJ_FLAG_HIDDEN)) {
+            lv_obj_add_flag(ui->stat_icon[index], LV_OBJ_FLAG_HIDDEN);
+        }
+        return;
+    }
+
+    lv_label_set_text(ui->stat_icon[index], symbol);
+    lv_obj_set_style_text_color(ui->stat_icon[index], color, 0);
+    if (lv_obj_has_flag(ui->stat_icon[index], LV_OBJ_FLAG_HIDDEN)) {
+        lv_obj_clear_flag(ui->stat_icon[index], LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
 void mon_page_set_note(mon_page_ui_t *ui, const char *note)
 {
     if (note == NULL || note[0] == '\0') {
@@ -461,9 +499,16 @@ void mon_chart_draw_cb(lv_event_t *e)
     lv_obj_t *obj = lv_event_get_target(e);
 
     /* Fill only the primary series: on a two-series chart (NETWORK RX/TX)
-     * two stacked translucent fills muddy the colour. */
-    lv_chart_series_t *first = lv_chart_get_series_next(obj, NULL);
-    if (dsc->sub_part_ptr != first) return;
+     * two stacked translucent fills muddy the colour. lv_chart_add_series()
+     * inserts at the head of the list, so the primary (first-added) series is
+     * the last one reached by walking from the head — the head itself is the
+     * most recently added one. */
+    lv_chart_series_t *primary = NULL;
+    for (lv_chart_series_t *ser = lv_chart_get_series_next(obj, NULL);
+         ser != NULL; ser = lv_chart_get_series_next(obj, ser)) {
+        primary = ser;
+    }
+    if (dsc->sub_part_ptr != primary) return;
 
     /* Soft gradient area under the line. */
     lv_draw_mask_line_param_t line_mask;
@@ -594,29 +639,36 @@ void mon_fmt_size_pair(uint64_t used_kb, uint64_t total_kb, bool compact,
 
 void mon_fmt_size(uint64_t kb, bool compact, char *buf, size_t buf_sz)
 {
+    char num[24];
+    char unit[12];
+
+    mon_fmt_size_split(kb, compact, num, sizeof(num), unit, sizeof(unit));
+    snprintf(buf, buf_sz, compact ? "%s%s" : "%s %s", num, unit);
+}
+
+void mon_fmt_size_split(uint64_t kb, bool compact,
+                        char *num, size_t num_sz, char *unit, size_t unit_sz)
+{
     double div;
-    const char *unit;
 
     if (kb >= 1024ULL * 1024ULL * 1024ULL) {
         div = 1024.0 * 1024.0 * 1024.0;
-        unit = compact ? "T" : "TB";
+        snprintf(unit, unit_sz, "%s", compact ? "T" : "TB");
     }
     else if (kb >= 1024ULL * 1024ULL) {
         div = 1024.0 * 1024.0;
-        unit = compact ? "G" : "GB";
+        snprintf(unit, unit_sz, "%s", compact ? "G" : "GB");
     }
     else if (kb >= 1024ULL) {
         div = 1024.0;
-        unit = compact ? "M" : "MB";
+        snprintf(unit, unit_sz, "%s", compact ? "M" : "MB");
     }
     else {
         div = 1.0;
-        unit = compact ? "K" : "KB";
+        snprintf(unit, unit_sz, "%s", compact ? "K" : "KB");
     }
 
-    char num[24];
-    fmt_short_num((double)kb / div, num, sizeof(num));
-    snprintf(buf, buf_sz, compact ? "%s%s" : "%s %s", num, unit);
+    fmt_short_num((double)kb / div, num, num_sz);
 }
 
 /* Disk capacities follow the drive labels, where 1 TB = 1000^4 bytes, so a

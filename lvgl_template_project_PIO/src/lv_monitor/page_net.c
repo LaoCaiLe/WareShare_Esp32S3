@@ -5,6 +5,9 @@
 #include <stdio.h>
 #include <string.h>
 
+/* TX line reads blue so the two directions can be told apart at a glance. */
+#define NET_TX_COLOR 0x7C8DFF
+
 static mon_page_ui_t s_ui;
 
 const mon_page_ui_t *page_net_ui(void) { return &s_ui; }
@@ -33,8 +36,13 @@ lv_obj_t *page_net_create(lv_obj_t *parent, lv_color_t accent)
     lv_chart_set_range(s_chart, LV_CHART_AXIS_PRIMARY_Y, 0, 1000);
 
     s_rx = lv_chart_add_series(s_chart, accent, LV_CHART_AXIS_PRIMARY_Y);
-    s_tx = lv_chart_add_series(s_chart, lv_color_hex(0x7C8DFF),
+    s_tx = lv_chart_add_series(s_chart, lv_color_hex(NET_TX_COLOR),
                                LV_CHART_AXIS_PRIMARY_Y);
+
+    /* Direction arrows use the same colours as the two chart lines. */
+    mon_page_set_stat_icon(&s_ui, 0, LV_SYMBOL_UP,
+                           lv_color_hex(NET_TX_COLOR));
+    mon_page_set_stat_icon(&s_ui, 1, LV_SYMBOL_DOWN, accent);
 
     uint32_t peak = 64U * 1024U;
     for (int i = 0; i < MON_HIST_LEN; i++) {
@@ -61,8 +69,10 @@ void page_net_update(const sys_sample_t *s)
     char down[32];
     char note[48];
 
-    mon_fmt_rate(s->net_rx_bps, m->compact, num, sizeof(num),
-                 unit, sizeof(unit));
+    /* Hero: cumulative download since the PC booted. net_rx_total is in
+     * bytes; mon_fmt_size_split() takes KB. */
+    mon_fmt_size_split(s->net_rx_total / 1024ULL, m->compact,
+                       num, sizeof(num), unit, sizeof(unit));
     mon_page_set_hero(&s_ui, num, unit);
 
     mon_fmt_rate_line(s->net_tx_bps, m->compact, up, sizeof(up));

@@ -22,6 +22,7 @@ typedef struct {
     lv_coord_t stage_y;
     lv_coord_t sub_y;
     lv_coord_t dots_y;
+    lv_coord_t dot_size;     /* page-indicator dot diameter */
 
     lv_coord_t stage_w;
     lv_coord_t stage_h;
@@ -54,6 +55,7 @@ typedef struct {
     lv_obj_t *stage;
     lv_obj_t *stage_cover;   /* black wipe cover for the page transition */
     lv_obj_t *sub_row;
+    lv_obj_t *stat_icon[2];
     lv_obj_t *stat_value[2];
     lv_obj_t *stat_caption[2];
     lv_obj_t *note;
@@ -77,6 +79,11 @@ void mon_page_set_hero_value(mon_page_ui_t *ui, double value,
                              uint8_t decimals, const char *unit);
 void mon_page_set_stat(mon_page_ui_t *ui, uint8_t index,
                        const char *value, const char *caption);
+/* Optional glyph shown before a stat value (e.g. LV_SYMBOL_UP/DOWN).
+ * The icon uses a stock Montserrat font because the custom caption font
+ * only carries ASCII. NULL or "" hides it again. */
+void mon_page_set_stat_icon(mon_page_ui_t *ui, uint8_t index,
+                            const char *symbol, lv_color_t color);
 void mon_page_set_note(mon_page_ui_t *ui, const char *note);
 
 /* ───────────── primitives ───────────── */
@@ -103,6 +110,8 @@ void mon_fmt_rate_line(uint64_t bytes_per_s, bool compact,
 void mon_fmt_size_pair(uint64_t used_kb, uint64_t total_kb, bool compact,
                        char *buf, size_t buf_sz);
 void mon_fmt_size(uint64_t kb, bool compact, char *buf, size_t buf_sz);
+void mon_fmt_size_split(uint64_t kb, bool compact,
+                        char *num, size_t num_sz, char *unit, size_t unit_sz);
 void mon_fmt_disk_pair(uint64_t used_kb, uint64_t total_kb, bool compact,
                        char *buf, size_t buf_sz);
 void mon_fmt_disk_size(uint64_t kb, bool compact, char *buf, size_t buf_sz);

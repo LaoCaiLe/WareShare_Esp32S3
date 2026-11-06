@@ -6,15 +6,12 @@
 #include <stdio.h>
 #include <string.h>
 
-/* Four small rings in a 2x2 grid: the ring sweep is the load in percent and
- * the value sits inside the circle. 60 px keeps "100%" inside a 5 px track
- * while leaving room for the little caption underneath. */
+/* Four rings in a 2x2 grid: the ring sweep is the load in percent and the
+ * value sits inside the circle. The diameter is not fixed — the grid grows
+ * to fill the band between the page tag and the page dots, so the rings are
+ * as large as the dial allows without touching either of them. */
 #define RING_COUNT 4
-#define RING_D     60
-#define RING_GAP   12
-#define RING_PAD   4
-#define RING_GROUP (RING_D * 2 + RING_GAP + RING_PAD * 2)
-#define RING_ARC_W 5
+#define RING_GAP   4     /* spacing between neighbouring rings */
 
 #define RING_SWEEP_MS   500   /* normal one-second refresh                */
 #define RING_ENTER_MS   700   /* entry refill, a little slower on purpose */
@@ -26,6 +23,10 @@ LV_FONT_DECLARE(font_cap_bold);
 static mon_page_ui_t s_ui;
 static lv_obj_t *s_ring[RING_COUNT];
 static lv_obj_t *s_pct[RING_COUNT];
+
+/* Ring geometry, resolved from the free band when the page is built. */
+static lv_coord_t s_ring_d;
+static lv_coord_t s_ring_arc_w;
 
 typedef struct {
     lv_obj_t *arc;
@@ -138,7 +139,7 @@ static void ring_create(uint8_t idx, lv_coord_t x, lv_coord_t y)
     lv_obj_t *arc = lv_arc_create(s_ui.stage);
     s_ring[idx] = arc;
 
-    lv_obj_set_size(arc, RING_D, RING_D);
+    lv_obj_set_size(arc, s_ring_d, s_ring_d);
     lv_obj_set_pos(arc, x, y);
     /* The dial is read-only and the page is paged by the touch layer, so the
      * ring must never take clicks or steal a vertical drag. */
@@ -147,11 +148,11 @@ static void ring_create(uint8_t idx, lv_coord_t x, lv_coord_t y)
 
     lv_obj_set_style_bg_opa(arc, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_style_border_width(arc, 0, LV_PART_MAIN);
-    lv_obj_set_style_arc_width(arc, RING_ARC_W, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(arc, s_ring_arc_w, LV_PART_MAIN);
     lv_obj_set_style_arc_color(arc, lv_color_hex(MON_RING), LV_PART_MAIN);
     lv_obj_set_style_arc_rounded(arc, true, LV_PART_MAIN);
 
-    lv_obj_set_style_arc_width(arc, RING_ARC_W, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_width(arc, s_ring_arc_w, LV_PART_INDICATOR);
     lv_obj_set_style_arc_color(arc, accent, LV_PART_INDICATOR);
     lv_obj_set_style_arc_rounded(arc, true, LV_PART_INDICATOR);
 
@@ -199,16 +200,32 @@ lv_obj_t *page_overview_create(lv_obj_t *parent, lv_color_t accent)
     lv_obj_add_flag(s_ui.hero_box, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_ui.sub_row, LV_OBJ_FLAG_HIDDEN);
 
-    /* Grow the stage into a square that holds the rings. The stage cover is
-     * resized with it so the left-to-right wipe still hides every ring. */
-    lv_obj_set_size(s_ui.stage, RING_GROUP, RING_GROUP);
-    lv_obj_align(s_ui.stage, LV_ALIGN_TOP_MID, 0,
-                 (m->dial_d - RING_GROUP) / 2);
-    lv_obj_set_size(s_ui.stage_cover, RING_GROUP, RING_GROUP);
+    /* The grid may use the whole band between the page tag above and the
+     * page dots below. That band is not centred on the dial — the tag sits
+     * higher than the dots — so the stage follows the band instead of the
+     * dial's middle. Two pixels of clearance keep the strokes off both. */
+    lv_coord_t tag_h = m->font_tag->line_height + 6;
+    lv_coord_t tag_bottom = m->tag_y + (tag_h + 1) / 2;
+    lv_coord_t dots_h = m->dot_size + 10;
+    lv_coord_t dots_top = m->dots_y - dots_h / 2;
+
+    lv_coord_t band_top = tag_bottom + 2;
+    lv_coord_t band_bottom = dots_top - 2;
+
+    s_ring_d = (band_bottom - band_top - RING_GAP) / 2;
+    s_ring_arc_w = LV_MAX(4, s_ring_d / 12);
+
+    lv_coord_t group = s_ring_d * 2 + RING_GAP;
+
+    /* The stage cover grows with the stage so the left-to-right wipe still
+     * hides every ring. */
+    lv_obj_set_size(s_ui.stage, group, group);
+    lv_obj_align(s_ui.stage, LV_ALIGN_TOP_MID, 0, band_top);
+    lv_obj_set_size(s_ui.stage_cover, group, group);
 
     for (uint8_t i = 0; i < RING_COUNT; i++) {
-        lv_coord_t x = RING_PAD + (i % 2) * (RING_D + RING_GAP);
-        lv_coord_t y = RING_PAD + (i / 2) * (RING_D + RING_GAP);
+        lv_coord_t x = (i % 2) * (s_ring_d + RING_GAP);
+        lv_coord_t y = (i / 2) * (s_ring_d + RING_GAP);
         ring_create(i, x, y);
     }
 

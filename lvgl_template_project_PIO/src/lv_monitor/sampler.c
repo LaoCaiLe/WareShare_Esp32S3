@@ -12,6 +12,7 @@
 #include <string.h>
 
 #include "lvgl.h"
+#include "time_keeper.h"
 
 /* The PC sends about one frame per second, so four missed frames mean the
  * companion or the WiFi link is really gone. */
@@ -116,6 +117,13 @@ static void sample_once(void)
                             : SYS_FREQ_UNKNOWN;
     s_sample.cpu_procs = p->cpu.procs;
     s_sample.uptime_sec = p->uptime;
+
+    /* PC clock: hand the sender's unix seconds to the persistent keeper.
+     * It keeps running on its own when frames stop (NVS/RTC restore), and
+     * SNTP can feed it independently when only the WiFi link is up. */
+    if (fresh && p->ts >= TIME_KEEPER_MIN_VALID) {
+        time_keeper_sync(p->ts);
+    }
 
     /* Memory --------------------------------------------------------- */
     uint32_t mem_used_kb = p->ram.used * 1024U;
@@ -248,6 +256,7 @@ static void sample_once(void)
 static void sampler_timer_cb(lv_timer_t *timer)
 {
     (void)timer;
+    time_keeper_poll();
     sample_once();
 }
 

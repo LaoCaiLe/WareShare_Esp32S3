@@ -13,6 +13,7 @@
 #include "display.h"
 #include "udp_reader.h"
 #include "data_model.h"
+#include "time_keeper.h"
 #include "touch.h"
 #include "lv_monitor/monitor.h"
 
@@ -35,6 +36,10 @@ void setup()
 
     /* UART0 (GPIO 43 TX / 44 RX) is debug output only. */
     Serial0.begin(921600);
+
+    /* Restore the wall clock before anything renders: a reflash must not
+     * leave the watch face blank while the PC companion is not running. */
+    time_keeper_init();
 
     udp_reader_init();
 

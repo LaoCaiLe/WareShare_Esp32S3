@@ -14,4 +14,14 @@
 /* UDP port the PC companion broadcasts to. Keep in sync with monitor.py. */
 #define NET_UDP_PORT 4210
 
+/* Local time offset from UTC in minutes, used to render the PC clock on the
+ * INFO page (UTC+8 = 480). */
+#define NET_TZ_OFFSET_MIN 480
+
+/* Weather location for Open-Meteo. Change these to your city; the INFO page
+ * shows the current temperature and today's high/low. */
+#define NET_WEATHER_LAT   22.5431
+#define NET_WEATHER_LON   114.0579
+#define NET_WEATHER_PLACE "SHENZHEN"
+
 #endif /* NET_CONFIG_H */

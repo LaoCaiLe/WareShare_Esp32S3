@@ -65,6 +65,7 @@ lvgl_template_project_PIO/
 │   ├── net_config.example.h        # 配置模板（入库）
 │   ├── CST816S.cpp/.h              # 触摸控制器驱动（已关自动休眠）
 │   ├── touch.cpp/.h                # 20 ms 轮询、滑动/点击识别
+│   ├── time_keeper.cpp/.h          # 持久化时钟：NVS + RTC 计数器 + SNTP
 │   ├── data_model.h                # pc_data_t：PC 原始数据
 │   └── lv_monitor/
 │       ├── monitor.c/.h            # 界面骨架、页面表、轮播、分层转场
@@ -90,14 +91,15 @@ lvgl_template_project_PIO/
 1. `setCpuFrequencyMhz(160)` — 从默认 240 MHz 降到 160 MHz，降低动态功耗（见 §7.1）。
 2. `app_settings_init()` — 从 NVS 读取亮度 / 每页停留 / 转场时长 / WiFi 开关 / 自动轮播开关 / 屏幕方向 / 熄屏时长（首次启动用默认值），把时序下发给 `monitor_set_timings()`，自动轮播下发给 `monitor_set_auto()`。方向与熄屏只读入配置，硬件在屏幕和触摸就绪后再由调用方应用。
 3. `Serial0.begin(921600)` — 启动 UART0（GPIO43 TX / 44 RX），只用于调试日志，不接收数据。
-4. `udp_reader_init()` — 若设置为关闭 WiFi 则直接 `WIFI_OFF` 返回；否则 `WiFi.mode(WIFI_STA)`、**开启 modem sleep**（射频在 DTIM 之间休眠）、开启自动重连，`WiFi.begin(SSID, PASS)`（非阻塞）。
-5. `screen.init()` — `lv_init()`；TFT_eSPI 初始化并清屏；背光引脚切到 LEDC PWM；注册 LVGL 显示驱动与两块半屏缓冲。
-6. `app_settings_apply_rotation()` — 在首帧之前把面板 `tft.setRotation()` 与触摸镜像一起设成 NVS 保存的方向（默认 180°，见 §6.7），两者必须同步，否则手指和像素的左右方向不一致。
-7. `display_set_backlight()` — 应用 NVS 里保存的亮度。
-8. `touch_init()` — CST816S 硬复位（RST 低 5 ms → 高 50 ms），读版本，**关闭自动休眠**，注册 LVGL 指针输入，创建 20 ms 轮询定时器，并把“最近触摸时刻”初始化为当前时间。
-8. `lv_monitor_set_pc_data(&pc_data)` — 把全局 `pc_data` 交给采样器。
-10. `lv_monitor_show()` — `sampler_init()`、`mon_ui_init()`、`build_chrome()`（含设置层），注册手势回调，创建 250 ms 轮播定时器、250 ms 熄屏检查定时器和 1000 ms 数据刷新定时器。
-11. 串口打印 Build/Ready（仅调试用）。
+4. `time_keeper_init()` — 从 NVS 读回上次保存的时间锚点，按 RTC 计数器补上复位期间流逝的时间，把 newlib 系统时钟设置好（见 §3.4）。
+5. `udp_reader_init()` — 若设置为关闭 WiFi 则直接 `WIFI_OFF` 返回；否则 `WiFi.mode(WIFI_STA)`、**开启 modem sleep**（射频在 DTIM 之间休眠）、开启自动重连，`WiFi.begin(SSID, PASS)`（非阻塞）。
+6. `screen.init()` — `lv_init()`；TFT_eSPI 初始化并清屏；背光引脚切到 LEDC PWM；注册 LVGL 显示驱动与两块半屏缓冲。
+7. `app_settings_apply_rotation()` — 在首帧之前把面板 `tft.setRotation()` 与触摸镜像一起设成 NVS 保存的方向（默认 180°，见 §6.7），两者必须同步，否则手指和像素的左右方向不一致。
+8. `display_set_backlight()` — 应用 NVS 里保存的亮度。
+9. `touch_init()` — CST816S 硬复位（RST 低 5 ms → 高 50 ms），读版本，**关闭自动休眠**，注册 LVGL 指针输入，创建 20 ms 轮询定时器，并把“最近触摸时刻”初始化为当前时间。
+10. `lv_monitor_set_pc_data(&pc_data)` — 把全局 `pc_data` 交给采样器。
+11. `lv_monitor_show()` — `sampler_init()`、`mon_ui_init()`、`build_chrome()`（含设置层），注册手势回调，创建 250 ms 轮播定时器、250 ms 熄屏检查定时器和 1000 ms 数据刷新定时器。
+12. 串口打印 Build/Ready（仅调试用）。
 
 ### 3.2 `loop()`
 
@@ -113,13 +115,28 @@ lvgl_template_project_PIO/
 | 定时器 | 周期 | 归属 | 作用 |
 |---|---|---|---|
 | 触摸轮询 | 20 ms | `touch.cpp` | 读触摸点、识别滑动/点击 |
-| 采样 | 1000 ms | `sampler.c` | 把最新 `pc_data_t` 转换/平滑成 `sys_sample_t`，推进历史 |
+| 采样 | 1000 ms | `sampler.c` | 把最新 `pc_data_t` 转换/平滑成 `sys_sample_t`，推进历史；同时执行 `time_keeper_poll()`（接收 SNTP 校正、每分钟存锚点） |
 | 页面数据刷新 | 1000 ms | `monitor.c` | 刷新当前页数值（转场期间跳过） |
 | 轮播检查 | 250 ms | `monitor.c` | 距上次切页 ≥ `s_page_ms`（默认 5 s）则自动前进一页；熄屏时跳过 |
 | 熄屏检查 | 250 ms | `monitor.c` | `SLEEP` 非 NEVER 且距最近触摸 ≥ 设定分钟数则背光淡出；熄屏后触摸唤醒，见 §6.7 |
 | 英雄数字补间 | 420 ms | `common.c` | 数值变化时缓动 |
 | 磁盘条补间 | 650 ms | `page_disk.c` | 宽度变化缓动 |
 | 页面转场 | 200–1200 ms | `monitor.c` | 分层转场总时长 `s_trans_ms`（默认 600 ms） |
+
+### 3.4 时间来源与持久化（`time_keeper`）
+
+板载没有带电池的 RTC 芯片（1.28 寸板只有 CST816S + QMI8658，I2C 在 GPIO6/7），所以表面时钟由三层拼起来：
+
+| 场景 | 来源 |
+|---|---|
+| 正常运行 | PC 帧里的 `ts`（每秒）或 SNTP（WiFi 连上后自动启动，`ntp.aliyun.com` / `cn.pool.ntp.org` / `pool.ntp.org`） |
+| 复位/重新烧录（不掉电） | ESP32-S3 内部 RTC 计数器在复位后继续计数，`esp_rtc_get_time_us()` 与 NVS 锚点差值补回流逝时间 |
+| 完全断电 | NVS 里每分钟保存一次 `{epoch, rtc_us}` 锚点；下次上电先按锚点显示，断电期间时钟停走（无电池 RTC 无法补） |
+
+- 单一时间源：`info_refresh()` 只调用 `time_keeper_now()`；采样器收到 PC 帧后调用 `time_keeper_sync()`，不再在 `sys_sample_t` 里维护第二套 `pc_ts`。
+- `time_keeper_poll()` 每秒执行一次：发现 SNTP 把系统时钟校正了 >2 s 就重新锚定，并且每 60 s 把锚点写回 NVS（一次 16 字节 blob，NVS 磨损可忽略）。
+- 串口日志会打印 `[Time] restored/sync/resync ...`，可据此判断本次启动的时间来自哪一层。
+- 首次烧录且 NVS 被擦除时没有锚点，表盘先显示 `--:--` / `SETTING CLOCK`；WiFi 能上网时 SNTP 几秒内补齐，PC 广播也可补齐。
 
 ---
 
@@ -520,6 +537,7 @@ Broadcasting UDP on port 4210 to: 172.29.207.255, 192.168.1.255, 192.168.10.255
 - **CPU 温度依赖 LHM**：未运行 LibreHardwareMonitor（管理员、开启 Remote Web Server 8085）时，CPU 页温度位置显示进程数。
 - **磁盘总量口径**：`disk_phys_total` 来自物理盘总和，隐藏/恢复分区与未分配空间计入“已用”，因此页面总量会高于“我的电脑”里各卷之和；格式化使用十进制 TB，与硬盘标称一致。
 - **设置页为英文**：选项名为 BRIGHT / PAGE / TRANS / SLEEP / WIFI / AUTO TR / ROTATE，使用自制 14 px Bold 子集（约 4.5 KB Flash）；数值仍用内置 Montserrat 字体。
+- **无电池 RTC**：1.28 寸板没有 RTC 芯片，完全断电期间时钟停走；重新上电后从 NVS 锚点继续（最多滞后 1 分钟 + 断电时长），之后由 PC/SNTP 校正。要真正断电走时，需外接 PCF85063 等 I2C RTC + 纽扣电池。
 - **关闭 WiFi 后数据冻结**：设置里 WIFI 设为 OFF 后不会再收到 UDP 帧，各页保留最后一次数值；重新打开后 1–3 s 恢复。
 - **静态 RAM 已过半**：加入 WiFi 协议栈后静态占用约 56%，后续增加大缓冲或对象时注意堆余量。
 - **凭据管理**：`src/net_config.h` 含明文 WiFi 密码且已被 git 忽略；`src/net_config.example.h` 才是入库模板，不要搞反。
@@ -541,4 +559,4 @@ Broadcasting UDP on port 4210 to: 172.29.207.255, 192.168.1.255, 192.168.10.255
 
 ---
 
-*文档对应代码状态：WiFi/UDP 单通道 + 七页轮播（首页 OVERVIEW 四圆环总览）+ 页面圆点（位置推导颜色）+ 分层转场（图表左→右擦入）+ 开机入场（OVERVIEW 圆环依次填回）+ 单页滚动设置（watchOS 式缩放、吸附居中、NVS 持久化、自动轮播开关、滑块/滚动防误触、左/右滑退出）+ 屏幕方向设置（默认 180°，触摸同步镜像）+ 熄屏定时（NEVER/1/5/10/30 min，触摸唤醒）+ 无数据提示（NO DATA / NO WIFI / WAITING FOR PC，呼吸显示）+ 降功耗策略 + 十进制磁盘容量。*
+*文档对应代码状态：WiFi/UDP 单通道 + 七页轮播（首页 OVERVIEW 四圆环总览）+ 页面圆点（位置推导颜色）+ 分层转场（图表左→右擦入）+ 开机入场（OVERVIEW 圆环依次填回）+ 单页滚动设置（watchOS 式缩放、吸附居中、NVS 持久化、自动轮播开关、滑块/滚动防误触、左/右滑退出）+ 屏幕方向设置（默认 180°，触摸同步镜像）+ 熄屏定时（NEVER/1/5/10/30 min，触摸唤醒）+ 无数据提示（NO DATA / NO WIFI / WAITING FOR PC，呼吸显示）+ 内部时钟持久化（PC/SNTP/NVS 锚点 + RTC 计数器，重启/烧录不丢时间）+ 降功耗策略 + 十进制磁盘容量。*

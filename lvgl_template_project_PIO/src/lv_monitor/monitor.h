@@ -18,9 +18,11 @@ void lv_monitor_set_pc_data(const pc_data_t *data);
  * Build the monitor UI and start its sampling / carousel timers.
  * Returns immediately — the caller owns the lv_timer_handler() loop.
  *
- * Swipe left/right to change pages, swipe up for settings, swipe down to
- * leave them again. Inside settings, left/right turn its two pages and the
- * sliders ignore swipe gestures for the duration of a drag.
+ * The clock is the home screen. Swipe up to move to the data pages, swipe up
+ * again for SETTINGS; swipe down from the pages returns to the clock. Swipe
+ * left/right to change pages. SETTINGS closes on a sideways swipe because its
+ * list owns vertical drags. Sliders ignore swipe gestures for the duration of
+ * a drag.
  */
 void lv_monitor_show(void);
 
